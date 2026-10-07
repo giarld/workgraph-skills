@@ -1,5 +1,7 @@
 # OpenWorkgraph Skills
 
+[简体中文](README.zh-CN.md)
+
 Official skill repository for OpenWorkgraph. Skills retain OpenAI and agents/skills compatibility and include an English fallback `README.md`, localized READMEs when applicable, and `config.json` for configuration declarations.
 
 | Skill | Purpose |
@@ -9,4 +11,4 @@ Official skill repository for OpenWorkgraph. Skills retain OpenAI and agents/ski
 
 Skills live in `skills/<skill-name>/`. See the creator's [packaging reference](skills/openworkgraph-skill-creator/references/packaging.md) and [configuration format](skills/openworkgraph-skill-creator/references/configuration.md). Configuration format v1 is a new repository contract; application integration has not been verified.
 
-[简体中文](README.zh-CN.md)
+To maintain your own collection, follow [Create your own OpenWorkgraph skills repository](docs/create-your-own-skills-repository.md).

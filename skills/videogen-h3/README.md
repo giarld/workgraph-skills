@@ -1,5 +1,7 @@
 # VideoGen H3
 
+[简体中文](README.zh-CN.md)
+
 Generate and download videos through the MiniMax H3 V2 API. Supports text-to-video, first/last-frame image-to-video, multimodal image/video/audio references, and regeneration of eligible H3 768P outputs at 2K.
 
 ## Prerequisites and configuration
@@ -51,5 +53,3 @@ Submission returns a task ID; queries return status and, on success, a temporary
 - Query/wait exit with code `1` on failed or cancelled tasks; wait uses code `2` for a polling timeout. Successful commands use code `0`.
 
 API specifications retain the source skill's verification date of 2026-10-06. Package validation does not establish successful live API operation or application integration.
-
-[简体中文](README.zh-CN.md)

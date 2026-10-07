@@ -1,5 +1,7 @@
 # OpenWorkgraph 技能创建器
 
+[English](README.md)
+
 创建或更新 OpenWorkgraph 技能，也可将遵循 OpenAI 和 agents/skills 标准的通用技能转换为 OpenWorkgraph 技能包。
 
 ## 功能

@@ -6,6 +6,7 @@ Desktop.ini
 
 # Editor temporary files and local workspace state
 .idea/
+.memory/
 *.swp
 *.swo
 *~

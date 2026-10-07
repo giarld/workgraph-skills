@@ -1,5 +1,7 @@
 # OpenWorkgraph 技能库
 
+[English](README.md)
+
 OpenWorkgraph 官方技能仓库。技能保持 OpenAI 和 agents/skills 兼容性，同时提供英文回退 `README.md`、适用的多语言 README 和用于配置声明的 `config.json`。
 
 | 技能 | 用途 |
@@ -9,4 +11,4 @@ OpenWorkgraph 官方技能仓库。技能保持 OpenAI 和 agents/skills 兼容�
 
 技能位于 `skills/<skill-name>/`。要求见创建器的[打包参考](skills/openworkgraph-skill-creator/references/packaging.md)和[配置格式](skills/openworkgraph-skill-creator/references/configuration.md)。配置格式 v1 为新定义的仓库约定，尚未验证应用端集成。
 
-[English](README.md)
+如需维护自己的技能集合，请阅读[自建 OpenWorkgraph 技能仓库教程](docs/create-your-own-skills-repository.zh-CN.md)。

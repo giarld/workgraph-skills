@@ -1,5 +1,7 @@
 # OpenWorkgraph Skill Creator
 
+[简体中文](README.zh-CN.md)
+
 Create or update OpenWorkgraph skills, or convert existing OpenAI and agents/skills-compatible skills into OpenWorkgraph packages.
 
 ## Capabilities

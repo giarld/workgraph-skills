@@ -1,5 +1,7 @@
 # VideoGen H3
 
+[English](README.md)
+
 通过 MiniMax H3 V2 API 生成和下载视频。支持文生视频、首帧／尾帧图生视频、图片／视频／音频多模态参考，以及将符合要求的 H3 768P 生成视频再生成为 2K。
 
 ## 前置条件与配置
@@ -51,5 +53,3 @@ python3 scripts/h3.py download --task-id TASK_ID --output /absolute/path/video.m
 - 查询／等待遇到失败或取消任务时退出码为 `1`；等待超时为 `2`；成功命令为 `0`。
 
 API 规格沿用源技能的核对日期 2026-10-06。包校验不代表已通过在线 API 实测或应用端集成验证。
-
-[English](README.md)
