@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "environment": [
+    {
+      "name": "VIDEOGEN_H3_API_KEY",
+      "label": "API key",
+      "description": "Required for live generation, regeneration, task queries, and downloads; not needed for local dry runs.",
+      "required": true,
+      "secret": true,
+      "translations": {
+        "zh-CN": {
+          "label": "API 密钥",
+          "description": "在线生成、再生成、任务查询和下载时必需；本地 dry-run 无需密钥。"
+        }
+      }
+    },
+    {
+      "name": "VIDEOGEN_H3_API_BASE_URL",
+      "label": "API base URL",
+      "description": "Complete V2 API base URL. Custom endpoints must implement the MiniMax V2 schema; empty or invalid overrides fail.",
+      "required": false,
+      "secret": false,
+      "default": "https://api.minimax.cn/v2",
+      "translations": {
+        "zh-CN": {
+          "label": "API 基础地址",
+          "description": "完整 V2 API 基础地址。自定义端点须兼容 MiniMax V2 schema；空值或无效覆盖值会报错。"
+        }
+      }
+    }
+  ]
+}
