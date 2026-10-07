@@ -1,1 +1,37 @@
+# Operating system metadata
 .DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# Editor temporary files and local workspace state
+.idea/
+*.swp
+*.swo
+*~
+
+# Python bytecode, virtual environments, and tool caches
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local credentials and runtime environment files
+.env
+.env.*
+
+# Runtime logs and temporary files
+*.log
+*.tmp
+.cache/
+
+# Local generated outputs (root only, to preserve packaged skill assets)
+/outputs/
+/downloads/
+/tmp/
