@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "environment": [
+    {
+      "name": "IMAGEGEN_OPENAI_API_BASE_URL",
+      "label": "API base URL",
+      "description": "Complete OpenAI-compatible API base, including /v1 when required. Must provide model discovery and image generation.",
+      "required": false,
+      "secret": false,
+      "default": "https://api.openai.com/v1",
+      "translations": {
+        "zh-CN": {
+          "label": "模型服务基础地址",
+          "description": "完整的 OpenAI 兼容 API 基础地址，按供应商要求包含 /v1；须支持模型列表及图像生成接口。"
+        }
+      }
+    },
+    {
+      "name": "IMAGEGEN_OPENAI_API_KEY",
+      "label": "API key",
+      "description": "Required for model discovery and live image generation. Not needed for local dry runs or saving a stored response.",
+      "required": false,
+      "secret": true,
+      "translations": {
+        "zh-CN": {
+          "label": "API 密钥",
+          "description": "拉取供应商模型和在线生成图像时必需；本地 dry-run 及保存已有响应无需密钥。"
+        }
+      }
+    }
+  ]
+}
