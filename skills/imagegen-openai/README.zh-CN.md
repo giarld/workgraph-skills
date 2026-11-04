@@ -80,6 +80,8 @@ python3 scripts/imagegen.py upload --file /absolute/path/source.png --output-dir
 
 `upload` 接受小于 50 MiB 的 PNG／JPEG／WebP，支持 `--timeout`，通过 multipart `/files` 以 `purpose=vision` 上传，将返回的 File 对象保存到 `file.json`。将其 `id` 作为原生 `file_id` 使用；该操作不生图，也不发现模型。guide 的源图／蒙版 <50 MB 要求与 JSON `image_url` 最多 20,971,520 字符是独立限制，准备大输入前须查看参考文档。
 
+同步编辑新增 `--transport auto|json|multipart`，默认 `auto`：全部为本地路径／data URL 时使用 multipart；包含 HTTPS／file ID 时保留 JSON。单图上传字段为 `image`，多图为 `image[]`；网关要求重复 `image` 字段时可加 `--multipart-image-field image`。显式 multipart 遇到远程引用会在提交前报错。Dry-run 会显示所选传输方式；请求失败后不会自动换格式重试。`request.json` 保留规范化请求，`request-meta.json` 记录实际传输格式。
+
 ## 产物与恢复
 
 每次在线请求保留请求 JSON、响应元数据、最终 `response.json`、图像和含绝对路径的 manifest。流式请求另保存 `events.jsonl` 与 `partial-...` 预览；完成后保存最终响应供恢复。预览不能当作最终产物。Agent 须查看实际图像，确认外观、透明度、文字及修改要求。

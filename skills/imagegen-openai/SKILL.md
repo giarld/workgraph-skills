@@ -37,6 +37,10 @@ Read [references/api.md](references/api.md) for the **1.5/2/2.5 capability matri
 
 ## Prepare and submit
 
+Execute this helper through the host’s registered command tools (use `run_skill_command` when available). Reading this skill does not register a provider-native `image_generation` tool. Use the helper’s `responses` command for that API route; do not substitute an undeclared native tool. A returned base64 image is not delivered until it has been saved and inspected.
+
+Edits accept `--transport auto|json|multipart` (default `auto`). Auto chooses multipart when every source and mask/markup is a local path or data URL; it chooses JSON when any reference uses HTTPS or `file_id`. This is a local choice before submission, not endpoint discovery or a fallback retry. Use `--transport json` for providers requiring the newer JSON schema; use multipart for gateways requiring uploaded image bytes. Multipart sends `image` for one source and `image[]` for multiple sources; a gateway requiring repeated `image` fields can use `--multipart-image-field image`. Check the selected transport in `--dry-run`. Multipart rejects remote/file-ID references locally and never downloads or uploads references implicitly. A failed request never triggers a second submission with another encoding.
+
 Describe the requested subject, composition, style, exact text, and intended use. For edits, inspect the source and specify what to change and preserve. Actually pass reference images; a text description does not count as image input. Default to one PNG image with automatic size/quality unless the task needs explicit settings. Transparency needs PNG/WebP. Do not advertise adjustable high-fidelity tiers for 2/2.5.
 
 Write UTF-8 JSON without BOM. All three synchronous commands share this interface:
@@ -53,7 +57,7 @@ For Batch, read the reference before submission. Use standard JSONL `custom_id`/
 
 Responses `input_image_mask` also accepts a helper-local `{ "path": "mask.png" }` reference. In Batch bodies, supported local paths resolve against the JSONL directory. Before masked/markup edits, inspect source and overlay for matching oriented dimensions. The helper checks local markup pixels for transparency, but remote references and EXIF orientation require inspection. For a local/data-URL source with an Images mask, prepare matching PNG files; non-PNG source input is locally rejected.
 
-For a reusable reference or an image/mask exceeding the JSON data-URL limit, use `upload --file /absolute/path/source.png --output-dir ...` and pass the returned ID as `file_id`. Upload accepts PNG/JPEG/WebP under 50 MiB, supports `--dry-run`/`--timeout`, saves `file.json`, and does not generate images or discover models. See the reference for the separate guide and JSON limits.
+Synchronous multipart edits send image bytes without the JSON data-URL character limit; the per-file size limit still applies. For a reusable reference or larger input on a JSON-only route, use `upload --file /absolute/path/source.png --output-dir ...` and pass the returned ID as `file_id`. Upload accepts PNG/JPEG/WebP under 50 MiB, supports `--dry-run`/`--timeout`, saves `file.json`, and does not generate images or discover models. See the reference for the separate guide and JSON limits.
 
 ## Inspect, recover, and deliver
 

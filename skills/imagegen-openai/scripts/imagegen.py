@@ -330,7 +330,7 @@ def png_transparency(data):
     return transparent
 
 
-def image_ref(ref, root, overlay=False):
+def image_ref(ref, root, overlay=False, json_limit=True):
     require(isinstance(ref, dict) and len(ref) == 1 and
             set(ref) <= {'path', 'image_url', 'file_id'},
             'Image reference requires exactly one of path, image_url, or file_id')
@@ -346,7 +346,8 @@ def image_ref(ref, root, overlay=False):
         value = 'data:image/{};base64,{}'.format(fmt, base64.b64encode(data).decode('ascii'))
         field = 'image_url'
     if field == 'image_url':
-        require(len(value) <= MAX_IMAGE_URL, 'image_url exceeds 20,971,520 characters; use a file_id or HTTPS URL')
+        require(not json_limit or len(value) <= MAX_IMAGE_URL,
+                'image_url exceeds 20,971,520 characters; use a file_id, HTTPS URL, or multipart for synchronous edits')
         if value.startswith('data:'):
             match = re.fullmatch(r'data:image/(png|jpeg|webp);base64,(.+)', value, re.DOTALL)
             require(match is not None, 'Use a PNG, JPEG, or WebP base64 data URL')
@@ -366,19 +367,63 @@ def image_ref(ref, root, overlay=False):
     return {field: value}, png_info(data)[:2] if data is not None and image_format(data) == 'png' else None
 
 
-def prepare_edit(body, root):
+def prepare_edit(body, root, transport='json'):
     body = validate(body, editing=True)
-    refs = [image_ref(ref, root) for ref in body['images']]
+    refs = [image_ref(ref, root, json_limit=transport != 'multipart') for ref in body['images']]
     body['images'] = [ref for ref, _ in refs]
     first_url = body['images'][0].get('image_url', '')
     require('mask' not in body or not first_url.startswith('data:') or first_url.startswith('data:image/png;'),
             'A local/data source and mask must have matching formats; use PNG for both')
     for field in ('mask', 'markup'):
         if field in body:
-            body[field], dimensions = image_ref(body[field], root, overlay=field)
+            body[field], dimensions = image_ref(body[field], root, overlay=field, json_limit=transport != 'multipart')
             require(not dimensions or not refs[0][1] or dimensions == refs[0][1],
                     'mask/markup dimensions must match the first input image')
     return body
+
+
+def edit_transport(body, requested):
+    body = validate(body, editing=True)
+    refs = body['images'] + [body[field] for field in ('mask', 'markup') if field in body]
+    inline = all(isinstance(ref, dict) and len(ref) == 1 and
+                 ('path' in ref or isinstance(ref.get('image_url'), str)
+                  and ref['image_url'].startswith('data:')) for ref in refs)
+    if requested == 'auto':
+        return 'multipart' if inline else 'json'
+    require(requested != 'multipart' or inline,
+            'Multipart requires local paths or data URLs for every reference; use JSON for HTTPS URLs/file_id. No remote download or upload is automatic')
+    return requested
+
+
+def multipart_edit(body, image_field=None):
+    boundary = 'imagegen-' + uuid.uuid4().hex
+    parts = []
+    def part(name, data, filename=None, mime=None):
+        disposition = 'Content-Disposition: form-data; name="' + name + '"'
+        if filename:
+            disposition += '; filename="' + filename + '"'
+        headers = [('--' + boundary).encode('ascii'), disposition.encode('ascii')]
+        if mime:
+            headers.append(('Content-Type: ' + mime).encode('ascii'))
+        parts.append(b'\r\n'.join(headers) + b'\r\n\r\n' + data + b'\r\n')
+    for key, value in body.items():
+        if key not in EDIT_FIELDS:
+            part(key, (value if isinstance(value, str) else json.dumps(value, allow_nan=False)).encode('utf-8'))
+        elif key == 'input_fidelity':
+            part(key, value.encode('utf-8'))
+    for field in ('images', 'mask', 'markup'):
+        if field not in body:
+            continue
+        refs = body[field] if field == 'images' else [body[field]]
+        name = (image_field or ('image' if len(refs) == 1 else 'image[]')) if field == 'images' else field
+        for index, ref in enumerate(refs, 1):
+            url = ref.get('image_url', '')
+            require(url.startswith('data:image/'), 'Multipart requires inline image bytes')
+            data = base64.b64decode(url.split(',', 1)[1], validate=True)
+            fmt = image_format(data)
+            part(name, data, '{}-{}.{}'.format(field, index, fmt), 'image/' + fmt)
+    parts.append(('--' + boundary + '--\r\n').encode('ascii'))
+    return b''.join(parts), 'multipart/form-data; boundary=' + boundary
 
 
 def prepare_responses(body, root):
@@ -952,8 +997,16 @@ def run(args):
     if args.command.startswith('batch-'):
         return run_batch(args)
     raw_body = load_json(args.json)
+    transport = 'json'
+    wire = {}
     if args.command == 'edit':
-        body = prepare_edit(raw_body, args.json.resolve().parent)
+        transport = edit_transport(raw_body, args.transport)
+        require(not args.multipart_image_field or transport == 'multipart',
+                '--multipart-image-field requires multipart transport')
+        body = prepare_edit(raw_body, args.json.resolve().parent, transport)
+        if transport == 'multipart':
+            payload, content_type = multipart_edit(body, args.multipart_image_field)
+            wire = {'raw': payload, 'content_type': content_type}
     elif args.command == 'responses':
         body = prepare_responses(raw_body, args.json.resolve().parent)
     else:
@@ -965,6 +1018,7 @@ def run(args):
     if args.dry_run:
         options = body['tools'][0] if args.command == 'responses' else body
         return {'dry_run': True, 'method': 'POST', 'url': base + path,
+                'transport': transport,
                 'model': image_model, 'mainline_model': body['model'] if args.command == 'responses' else None,
                 'known_profile': known_family(image_model),
                 'n': body.get('n', 1), 'output_format': options.get('output_format', 'png'),
@@ -978,12 +1032,16 @@ def run(args):
             'Selected model is absent from the fresh provider catalog; no generation submitted')
     run_dir = new_run(args.output_dir)
     write_json(run_dir / 'request.json', body)
+    write_json(run_dir / 'request-meta.json', {'transport': transport,
+               'content_type': 'multipart/form-data' if transport == 'multipart' else 'application/json',
+               **({'image_field': args.multipart_image_field or ('image' if len(body['images']) == 1 else 'image[]')}
+                  if transport == 'multipart' else {})})
     print(json.dumps({'stage': args.command, 'model': image_model, 'run_dir': str(run_dir)}),
           file=sys.stderr, flush=True)
     try:
         response, request_id = request_json(base, key, 'POST', path, args.timeout, body,
                                            run_dir=run_dir, stream=body.get('stream', False),
-                                           expected=body.get('n', 1))
+                                           expected=body.get('n', 1), **wire)
     except (ValueError, OSError, RuntimeError, http.client.HTTPException) as exc:
         raise RuntimeError('{}; run_dir={}; keep request/events/response for recovery'.format(
             sanitized(exc), run_dir)) from None
@@ -1019,6 +1077,11 @@ def main():
         generate.add_argument('--output-dir', required=True, type=Path)
         generate.add_argument('--timeout', type=float, default=300)
         generate.add_argument('--dry-run', action='store_true')
+        if command == 'edit':
+            generate.add_argument('--transport', choices=('auto', 'json', 'multipart'), default='auto',
+                                  help='Auto uses multipart for local/data references, JSON otherwise; never retries with another transport')
+            generate.add_argument('--multipart-image-field', choices=('image', 'image[]'),
+                                  help='Override the multipart image field for provider compatibility (default: image for one, image[] for multiple)')
     save = sub.add_parser('save', help='Save images from a stored response without generating again')
     save.add_argument('--response', required=True, type=Path)
     save.add_argument('--output-dir', required=True, type=Path)

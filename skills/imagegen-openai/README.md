@@ -80,6 +80,8 @@ python3 scripts/imagegen.py upload --file /absolute/path/source.png --output-dir
 
 `upload` accepts PNG/JPEG/WebP under 50 MiB, supports `--timeout`, and uploads through multipart `/files` with `purpose=vision`. It saves the returned File object in `file.json`; use its `id` as a native `file_id`. It does not generate images or discover models. The guide’s <50 MB source/mask requirement and the JSON `image_url` maximum of 20,971,520 characters are separate limits; see the reference before preparing large inputs.
 
+Synchronous edits accept `--transport auto|json|multipart` (default `auto`). All local/data references use multipart; HTTPS/file-ID references use JSON. A single image is uploaded as `image`, multiple images as `image[]`; use `--multipart-image-field image` for gateways requiring repeated `image` fields. Explicit multipart rejects remote/file-ID references before submission. Dry runs report the selected transport. The helper never retries with another encoding after a failed request. The normalized request and selected wire transport are retained in `request.json` and `request-meta.json`.
+
 ## Outputs and recovery
 
 Each live request preserves request JSON, response metadata, final `response.json`, images, and a manifest with absolute paths. Streaming also records `events.jsonl` and `partial-...` previews. The completed response is saved for recovery; previews are not final images. The agent must view final outputs to check appearance, transparency, text, and requested edits.

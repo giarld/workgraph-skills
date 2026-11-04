@@ -88,14 +88,18 @@ For a compressed opaque asset use `output_format: "jpeg"` or `"webp"`, `output_c
 
 ## Images edits: native references and local extension
 
-The helper sends JSON, not the SDK’s multipart `image[]` syntax. Use required `images` (1–16 references) plus `prompt` and explicit `model`. Output/streaming fields follow the Images table. `input_fidelity` is available only for supported older models such as 1.5; omit it for 2/2.5.
+The request file uses `images` (1–16 references), `prompt` and an explicit `model`. Synchronous edit selects its wire encoding with `--transport auto|json|multipart`, default `auto`. All local paths/data URLs (including mask/markup) select multipart; any HTTPS/`file_id` reference selects JSON. Choose explicitly when the provider requires a particular encoding. This decision makes no network request and never falls back after submission. Batch edits continue to use JSON.
+
+Multipart uploads decoded bytes with `image` for a single source or `image[]` for multiple sources, and separate `mask`/`markup` file parts. For gateways that require repeated `image` fields for multiple sources, use `--multipart-image-field image`. Scalar options are form fields; booleans are lowercase `true`/`false`. Remote URLs/file IDs are rejected in explicit multipart mode before discovery or submission; the helper never downloads or uploads them automatically. Local references remain subject to image format, size, dimensions and overlay validation. Output/streaming options remain unchanged, and `input_fidelity` is still omitted for 2/2.5.
+
+Use `--dry-run` to inspect the chosen transport. Each live request saves `request.json` (the normalized logical request) and `request-meta.json` (wire transport, content type, and multipart image field); neither contains credentials. Saving responses, streaming previews/final files and error recovery work identically for both transports. Provider support still requires verification: the selected transport is not a capability probe.
 
 Every reference in `images`, `mask`, or `markup` must have exactly one of:
 
 - `{ "image_url": "https://example.com/image.png" }`: an HTTPS source.
 - `{ "image_url": "data:image/png;base64,..." }`: a data URL.
 - `{ "file_id": "file-..." }`: an uploaded image file accessible to the provider.
-- `{ "path": "assets/source.png" }`: helper-only extension; converted to a data URL before submission.
+- `{ "path": "assets/source.png" }`: helper-only extension; sent as uploaded bytes for multipart, or converted to a data URL for JSON.
 
 All local `path` values resolve relative to **the request JSON file**, not the shell working directory. Do not combine keys or send `path` to the API. Native file IDs/URLs are not proof that source dimensions or alpha were checked locally. Ordinary source images and masks receive file-signature and readable PNG header/dimension/alpha-marker checks; local markup additionally receives the PNG decoding checks below. The helper does not apply/check EXIF orientation or decode remote references. Before submitting, inspect the source and overlay, confirm matching dimensions after orientation, and prepare corrected files if needed.
 
@@ -132,7 +136,7 @@ Add `mask` to an edit to guide changes to the **first** source image. It must ha
 ```
 For **outpainting**, prepare a larger source canvas with the original positioned inside it and a same-size alpha mask whose new area is transparent. Submit them through `edit`, choose a supported output size, and prompt for extending the scene into that area. Do not invent an `outpaint` endpoint or guarantee exact pixel preservation.
 
-The JSON reference schema independently limits **each `image_url` to 20,971,520 characters**, including a data URL’s prefix/base64 expansion. A local file under 50 MB can still exceed that encoded limit. Use `upload` below and pass its returned ID as `file_id`, or resize/re-encode as appropriate. Do not apply an obsolete blanket 4 MB mask limit or equate the guide’s file limit with the JSON character limit.
+The JSON reference schema independently limits **each `image_url` to 20,971,520 characters**, including a data URL’s prefix/base64 expansion. A local file under 50 MB can still exceed that encoded limit. For synchronous edits, multipart sends bytes without the JSON URL-character limit. Alternatively use `upload` below and pass its returned ID as `file_id` over JSON, or resize/re-encode as appropriate. Multipart keeps the helper’s per-file limit below 50 MiB; also satisfy the provider’s file limit. Do not apply an obsolete blanket 4 MB mask limit or equate file limits with the JSON character limit.
 
 ### Upload references and masks without generating
 
