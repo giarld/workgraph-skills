@@ -1,6 +1,6 @@
 ---
 name: imagegen-openai
-description: Generate and edit raster images with OpenAI GPT Image models through a configurable OpenAI-compatible provider. Use for text-to-image, reference-image composition, global or masked edits, outpainting, transparent assets, GPT Image 2.5 markup, streaming previews, conversational image iteration, and asynchronous batches. Discover available models before submission.
+description: Generate and edit images with OpenAI GPT Image models through a configurable OpenAI-compatible provider. Use for raster images, GPT Image 2.6 SVG or animated GIF generation, complexity control, reference composition, masked edits, outpainting, transparent assets, markup, streaming previews, conversational image iteration, and asynchronous batches on compatible models. Discover available models before submission.
 ---
 
 # ImageGen OpenAI
@@ -20,20 +20,23 @@ python3 <skill-dir>/scripts/imagegen.py models
 
 ## Choose the model and route
 
-Respect an explicit available user choice after checking capability compatibility. Otherwise prefer a documented suitable model: GPT Image 2.5 Sunburst for editing precision, Flare for fast everyday generation, or 2/1.5 for compatible established workflows. This is task guidance, not an availability list, price ranking, or visual-quality guarantee. Other listed models remain selectable after documentation checks. Explain the choice briefly.
+Respect an explicit available user choice after checking capability compatibility. For Images requests, prefer GPT Image 2.6 Sunburst for detailed compositions and precise edits, or GPT Image 2.6 Flare for fast iteration. The exact IDs are `gpt-image-2.6-sunburst` and `gpt-image-2.6-flare`; do not invent a bare `gpt-image-2.6` alias. Retain 2.5/2/1.5 for documented compatible workflows. This is task guidance, not an availability list, price ranking, or visual-quality guarantee. Other listed models remain selectable after documentation checks. Explain the choice briefly.
 
 | Task | Route |
 | --- | --- |
 | New image from text; transparent output | `generate` → Images generations |
 | Global transformation, multiple reference images, local mask edit, canvas extension/outpainting | `edit` → Images edits |
-| Transparent PNG drawing/annotation overlay for GPT Image 2.5 | `edit` with `markup`; never combine with `mask` |
+| Transparent PNG drawing/annotation overlay for GPT Image 2.5/2.6 | `edit` with `markup`; never combine with `mask` |
+| SVG vector graphic or animated GIF with GPT Image 2.6 | `generate` only; no streaming or edits; read format constraints below |
 | Conversational iteration, earlier image tool calls, `previous_response_id` | `responses` → Responses with one explicit image generation tool |
 | Partial previews | `stream: true`; Images top-level `partial_images`, Responses tool-level `partial_images` |
 | Asynchronous independent requests | `batch-submit`, then `batch-status` and `batch-download` |
 | Recover already-returned images | `save`; no new generation |
 | Upload a reusable reference or a file too large for a JSON data URL | `upload` → Files with `purpose=vision`; no generation or model discovery |
 
-Read [references/api.md](references/api.md) for the **1.5/2/2.5 capability matrix**, schemas, examples, input limits, streaming, batch lifecycle, and official sources verified **2026-11-04**. Check the matrix before preparing a request: `xhigh`/`max` and `markup` are 2.5-only; GPT Image 2 transparency is preview; adjustable `input_fidelity` belongs to 1.5, and must be omitted for 2/2.5. Batch image endpoints are currently documented for 2.5; do not extend that support to older models without evidence. Do not copy Images-only fields into a Responses tool.
+Read [references/api.md](references/api.md) for the **2.6 update verified 2026-11-05**, the earlier-family matrix, schemas, and recovery. For 2.6, use `quality: auto|low|medium|high` and optional `complexity: low|medium|high` (provider default `high`); these control different things. Do not infer `xhigh`/`max` or raster size limits from 2.5. Omit `input_fidelity` for 2/2.5/2.6. The helper rejects known 2.6 models in Responses and Batch because support is not established by the checked documentation; use a separately selected compatible model for those routes, never silently substitute.
+
+SVG/GIF require `generate`, without streaming, partial previews, or compression. SVG requires `n: 1`; optional `svg.model`/`svg.reasoning` need author-model access and documented compatibility, and the author ID is also discovered before submission. GIF uses `frame_count` (helper range 2–16, default 9) and `frame_duration_ms` (20–2000, default 200); see the reference for conflicting official limits and provider-specific frame/total-pixel budgets. Default to `size: auto` for GIF. SVG/GIF are output-only; raster edit inputs remain PNG/JPEG/WebP. Inspect SVG rendering or GIF playback as appropriate before delivery; signature/XML checks alone do not verify visual content or animation.
 
 ## Prepare and submit
 
@@ -41,7 +44,7 @@ Execute this helper through the host’s registered command tools (use `run_skil
 
 Edits accept `--transport auto|json|multipart` (default `auto`). Auto chooses multipart when every source and mask/markup is a local path or data URL; it chooses JSON when any reference uses HTTPS or `file_id`. This is a local choice before submission, not endpoint discovery or a fallback retry. Use `--transport json` for providers requiring the newer JSON schema; use multipart for gateways requiring uploaded image bytes. Multipart sends `image` for one source and `image[]` for multiple sources; a gateway requiring repeated `image` fields can use `--multipart-image-field image`. Check the selected transport in `--dry-run`. Multipart rejects remote/file-ID references locally and never downloads or uploads references implicitly. A failed request never triggers a second submission with another encoding.
 
-Describe the requested subject, composition, style, exact text, and intended use. For edits, inspect the source and specify what to change and preserve. Actually pass reference images; a text description does not count as image input. Default to one PNG image with automatic size/quality unless the task needs explicit settings. Transparency needs PNG/WebP. Do not advertise adjustable high-fidelity tiers for 2/2.5.
+Describe the requested subject, composition, style, exact text, and intended use. For edits, inspect the source and specify what to change and preserve. Actually pass reference images; a text description does not count as image input. Default to one PNG image with automatic size/quality unless the task needs explicit settings. Transparency needs PNG/WebP. Do not advertise adjustable high-fidelity tiers for 2/2.5/2.6. For focused 2.6 edits consider low complexity; dense text or complex relationships may benefit from high complexity, with more latency and potential unwanted changes.
 
 Write UTF-8 JSON without BOM. All three synchronous commands share this interface:
 

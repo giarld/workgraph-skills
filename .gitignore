@@ -36,4 +36,4 @@ htmlcov/
 /outputs/
 /downloads/
 /tmp/
-/tests/
+tests/

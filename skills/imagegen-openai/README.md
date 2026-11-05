@@ -2,9 +2,17 @@
 
 [简体中文](README.zh-CN.md)
 
-Generate and edit raster images through OpenAI or an OpenAI-compatible provider. Workflows include text-to-image, global restyling, multiple reference images, masked edits and outpainting, transparent assets, GPT Image 2.5 markup overlays, streaming previews, Responses multi-turn iteration, and asynchronous Batch requests.
+Generate and edit images through OpenAI or an OpenAI-compatible provider. Workflows include raster images, GPT Image 2.6 SVG/GIF generation, global restyling, multiple reference images, masked edits and outpainting, transparent assets, GPT Image 2.5/2.6 markup overlays, and streaming, Responses iteration, or Batch requests on compatible models.
 
-The agent discovers live models before submission and checks their documented capabilities. Sunburst is suited to editing precision; Flare to fast everyday generation. Available older or unfamiliar models remain selectable after endpoint/schema verification. No model name, listing, or quality setting guarantees a particular visual result.
+The agent discovers live models before submission and checks their documented capabilities. For Images requests, prefer GPT Image 2.6 Sunburst for detail and precise edits, or GPT Image 2.6 Flare for fast iteration. Available older or unfamiliar models remain selectable after endpoint/schema verification. No model name, listing, or quality setting guarantees a particular visual result.
+
+## GPT Image 2.6
+
+Use discovered IDs `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare` for Images requests. The helper adds `complexity: low|medium|high` (API default `high`), markup edits, and SVG/GIF generation. Use `quality: auto|low|medium|high`; extended 2.5 tiers are not assumed.
+
+SVG requires `output_format: svg` and `n: 1`; GIF uses `output_format: gif` with optional `frame_count` and `frame_duration_ms`. Neither supports edits, streaming, or compression. Conservative GIF limits are 2–16 frames and 20–2000 ms because official pages differ; verify preview access and pixel budgets. Outputs retain their actual extensions and support `save` recovery. See [examples and compatibility details](references/api.md#gpt-image-26-verified-2026-11-05).
+
+Known 2.6 models are rejected on Responses and Batch routes until support is documented. Select compatible models separately; there is no automatic substitution.
 
 ## Requirements and configuration
 
@@ -27,7 +35,7 @@ Example agent requests:
 
 > Use imagegen-openai to generate a transparent watercolor fox, with streaming previews.
 
-> Edit this room using the attached furniture references; preserve the layout. Use the mask for the chair, or a separate GPT Image 2.5 markup overlay to indicate changes.
+> Edit this room using the attached furniture references; preserve the layout. Use the mask for the chair, or a separate GPT Image 2.5/2.6 markup overlay to indicate changes.
 
 > Continue editing the previous image through Responses, using a listed mainline model with documented image generation tool support.
 
@@ -43,7 +51,7 @@ Create UTF-8 JSON without BOM. Replace the example model with an exact returned 
 
 ```json
 {
-  "model": "gpt-image-2.5-flare",
+  "model": "gpt-image-2.6-flare",
   "prompt": "A watercolor red fox reading a book, isolated on a transparent background, no text.",
   "size": "1024x1024",
   "quality": "medium",
@@ -63,13 +71,13 @@ python3 scripts/imagegen.py responses --json responses.json --output-dir /absolu
 
 All three request commands accept `--dry-run` and `--timeout`. Dry runs validate locally without a key, network calls, discovery, or output writes; they do not establish model access. Live submission refreshes the model list and stops if discovery fails or any selected ID is absent.
 
-Edits use native `images: [{image_url: ...}, {file_id: ...}]` references (1–16 images), plus the helper’s `{path: ...}` local extension. `mask` and `markup` use the same reference format, are mutually exclusive, and target the first source image. Local paths resolve against the request JSON. A markup overlay must be a transparent PNG with matching oriented dimensions and is **2.5-only**.
+Edits use native `images: [{image_url: ...}, {file_id: ...}]` references (1–16 images), plus the helper’s `{path: ...}` local extension. `mask` and `markup` use the same reference format, are mutually exclusive, and target the first source image. Local paths resolve against the request JSON. A markup overlay must be a transparent PNG with matching oriented dimensions and is supported on **2.5/2.6**.
 
 Responses requires an explicit top-level mainline `model` and exactly one `image_generation` tool with explicit `model`. Both are checked against the live list; additionally verify the mainline model’s documented tool support. Native input supports image URLs/file IDs and earlier `image_generation_call` context; `previous_response_id` carries conversational state. The helper converts local `{type: "input_image", path: ...}` into a data URL and defaults `tool_choice` to `{type: "image_generation"}`. Its tool schema has `input_image_mask` and **no markup field**.
 
-Read the [API reference and 1.5/2/2.5 capability matrix](references/api.md) before choosing settings. In particular, `xhigh`/`max` and markup are 2.5-only; 1.5 has fixed sizes while 2/2.5 allow constrained custom dimensions; GPT Image 2 transparency is preview. `input_fidelity` is adjustable on 1.5 and must be omitted for 2/2.5. Unknown listed models require documented endpoint/schema verification before submission.
+Read the [API reference and 2.6 update and earlier-family capability matrix](references/api.md) before choosing settings. In particular, `xhigh`/`max` remain documented here for 2.5; markup supports 2.5/2.6; 1.5 has fixed sizes while 2/2.5 allow constrained custom dimensions; GPT Image 2 transparency is preview. `input_fidelity` is adjustable on 1.5 and must be omitted for 2/2.5/2.6. Unknown listed models require documented endpoint/schema verification before submission.
 
-The Responses `input_image_mask` also supports a local `{path: ...}` reference. Before using masks or markup, inspect real transparency and oriented source/overlay dimensions. The helper only checks file signatures and readable PNG headers/alpha/dimensions; it does not fully decode images, confirm transparent pixels, or verify EXIF orientation. For Images masks, non-PNG local/data-URL source images are locally rejected; prepare matching PNG source and mask.
+The Responses `input_image_mask` also supports a local `{path: ...}` reference. Before using masks or markup, inspect real transparency and oriented source/overlay dimensions. The helper checks file signatures and PNG headers/alpha/dimensions, and decodes local markup to verify transparent pixels. It does not inspect remote image pixels or verify EXIF orientation. For Images masks, non-PNG local/data-URL source images are locally rejected; prepare matching PNG source and mask.
 
 For reusable references or images/masks too large for a JSON data URL:
 
@@ -107,4 +115,4 @@ python3 scripts/imagegen.py batch-download --id batch_returned_id --output-dir /
 
 `--endpoint` is optional and accepts `/images/generations`, `/images/edits`, or `/responses`. Submission discovers all models before multipart upload of the prepared JSONL with `purpose=batch` and creation of a batch with the `24h` completion window. Download retains raw `output.jsonl`/`error.jsonl` and associates images with `custom_id`; result order is not input order. Cancel only on an explicit user request with `batch-cancel --id ...`. No batch discount or universal provider support is promised.
 
-Official source verification: **2026-11-04**. Full request examples, mask/file-size versus URL-character limits, and source links are in [references/api.md](references/api.md).
+GPT Image 2.6 source verification: **2026-11-05**; earlier-family reference baseline: **2026-11-04**. Full request examples, mask/file-size versus URL-character limits, and source links are in [references/api.md](references/api.md).

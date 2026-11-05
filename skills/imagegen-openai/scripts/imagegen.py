@@ -17,25 +17,31 @@ import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 import zlib
 
 BASE_ENV = 'IMAGEGEN_OPENAI_API_BASE_URL'
 KEY_ENV = 'IMAGEGEN_OPENAI_API_KEY'
 DEFAULT_BASE = 'https://api.openai.com/v1'
-FAMILIES = ('gpt-image-2.5-sunburst', 'gpt-image-2.5-flare',
+FAMILIES_26 = ('gpt-image-2.6-sunburst', 'gpt-image-2.6-flare')
+FAMILIES = FAMILIES_26 + ('gpt-image-2.5-sunburst', 'gpt-image-2.5-flare',
             'gpt-image-2', 'gpt-image-1.5')
 PROFILES = {family: {
     'quality': ['auto', 'low', 'medium', 'high'] + (['xhigh', 'max'] if '2.5' in family else []),
-    'custom_size': family != 'gpt-image-1.5',
+    'custom_size': None if family in FAMILIES_26 else family != 'gpt-image-1.5',
     'input_fidelity': ['low', 'high'] if family == 'gpt-image-1.5' else [],
-    'markup': '2.5' in family,
+    'markup': '2.5' in family or family in FAMILIES_26,
+    'complexity': ['low', 'medium', 'high'] if family in FAMILIES_26 else [],
+    'output_formats': ['png', 'jpeg', 'webp'] + (['svg', 'gif'] if family in FAMILIES_26 else []),
+    'responses_documented': family not in FAMILIES_26,
     'transparent_background': 'preview' if family == 'gpt-image-2' else 'supported',
     'image_batch_documented': '2.5' in family,
     'generation': True, 'editing': True, 'streaming': True,
 } for family in FAMILIES}
 FIELDS = {'model', 'prompt', 'n', 'size', 'quality', 'output_format',
           'background', 'output_compression', 'moderation', 'safety_identifier',
-          'stream', 'partial_images', 'user'}
+          'stream', 'partial_images', 'user', 'complexity',
+          'frame_count', 'frame_duration_ms', 'svg'}
 EDIT_FIELDS = {'images', 'mask', 'markup', 'input_fidelity'}
 TOOL_FIELDS = {'type', 'model', 'action', 'background', 'input_fidelity',
                'input_image_mask', 'moderation', 'output_compression',
@@ -101,7 +107,7 @@ def validate_fidelity(body):
         require(body['input_fidelity'] in ('low', 'high'), 'Invalid input_fidelity')
         family = known_family(body['model'])
         require(not family or family == 'gpt-image-1.5',
-                'Omit input_fidelity for GPT Image 2/2.5; this is not a configurable fidelity tier')
+                'Omit input_fidelity for GPT Image 2/2.5/2.6; this is not a configurable fidelity tier')
 
 
 def validate(body, editing=False):
@@ -114,10 +120,40 @@ def validate(body, editing=False):
     require(isinstance(prompt, str) and prompt.strip() and len(prompt) <= 32000,
             'prompt must contain 1–32000 characters')
     body = dict(body)
+    family = known_family(body['model'])
     body.setdefault('n', 1)
     body.setdefault('output_format', 'png')
     require(type(body['n']) is int and 1 <= body['n'] <= 10, 'n must be an integer from 1 to 10')
-    require(body['output_format'] in ('png', 'jpeg', 'webp'), 'Invalid output_format')
+    fmt = body['output_format']
+    require(fmt in ('png', 'jpeg', 'webp', 'svg', 'gif'), 'Invalid output_format')
+    if family:
+        require(fmt in PROFILES[family]['output_formats'], 'Unsupported output format for the known model family')
+    if 'complexity' in body:
+        require(body['complexity'] in ('low', 'medium', 'high'), 'Invalid complexity')
+        require(not family or family in FAMILIES_26, 'complexity requires GPT Image 2.6')
+    if fmt in ('svg', 'gif'):
+        require(not editing, 'SVG/GIF output is supported only by Images generation, not edits')
+        require(not body.get('stream') and not body.get('partial_images'), 'SVG/GIF output cannot stream or return partial images')
+        require('output_compression' not in body, 'SVG/GIF output does not support output_compression')
+    if fmt == 'svg':
+        require(body['n'] == 1, 'SVG output requires n=1')
+    if 'svg' in body:
+        svg = body['svg']
+        require(fmt == 'svg' and isinstance(svg, dict) and set(svg) <= {'model', 'reasoning'},
+                'svg options require output_format=svg and only model/reasoning fields')
+        require(isinstance(svg.get('model'), str) and svg['model'].strip(), 'svg.model is required when selecting an SVG author')
+        require(known_family(svg['model']) is None, 'svg.model must be an SVG author, not a GPT Image model')
+        reasoning = svg.get('reasoning')
+        if reasoning is not None:
+            require(isinstance(reasoning, dict) and set(reasoning) <= {'effort'}, 'Invalid SVG reasoning object')
+            require(reasoning.get('effort') in (None, 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'),
+                    'Invalid SVG reasoning effort; also verify the author model supports it')
+    if 'frame_count' in body:
+        require(fmt == 'gif' and type(body['frame_count']) is int and 2 <= body['frame_count'] <= 16,
+                'frame_count requires GIF output and an integer from 2 to 16 (conservative API reference limit)')
+    if 'frame_duration_ms' in body:
+        require(fmt == 'gif' and type(body['frame_duration_ms']) is int and 20 <= body['frame_duration_ms'] <= 2000,
+                'frame_duration_ms requires GIF output and an integer from 20 to 2000')
     require(body.get('background', 'auto') in ('auto', 'opaque', 'transparent'), 'Invalid background')
     require(body.get('background') != 'transparent' or body['output_format'] in ('png', 'webp'),
             'Transparent backgrounds require PNG or WebP')
@@ -140,7 +176,7 @@ def validate(body, editing=False):
         require(not ('mask' in body and 'markup' in body), 'mask and markup cannot be combined')
         if 'markup' in body:
             family = known_family(body['model'])
-            require(not family or family.startswith('gpt-image-2.5-'), 'markup requires GPT Image 2.5')
+            require(not family or PROFILES[family]['markup'], 'markup requires GPT Image 2.5/2.6')
     family = known_family(body['model'])
     quality = body.get('quality', 'auto')
     require(isinstance(quality, str) and quality.strip(), 'quality must be a nonempty string')
@@ -155,6 +191,10 @@ def validate(body, editing=False):
         if family == 'gpt-image-1.5':
             require(size in ('1024x1024', '1536x1024', '1024x1536'),
                     'Unsupported size for gpt-image-1.5')
+        elif family in FAMILIES_26 or fmt == 'gif':
+            require(width % 16 == 0 and height % 16 == 0, 'Dimensions must be multiples of 16')
+            # Do not copy 2/2.5 raster pixel limits to 2.6 or animated frames.
+            # Provider-specific edge and total animation budgets still need verification.
         elif family:
             require(width % 16 == 0 and height % 16 == 0
                     and width <= 3 * height and height <= 3 * width,
@@ -438,6 +478,11 @@ def prepare_responses(body, root):
             and tools[0].get('type') == 'image_generation', 'Use exactly one image_generation tool')
     tool = dict(tools[0])
     require(set(tool) <= TOOL_FIELDS, 'Unsupported image_generation tool field; see references/api.md')
+    require(isinstance(tool.get('model'), str) and tool['model'].strip(), 'An explicit image tool model is required')
+    require(known_family(tool.get('model', '')) not in FAMILIES_26,
+            'GPT Image 2.6 Responses tool support is not verified; use Images generation/edit')
+    require(tool.get('output_format', 'png') in ('png', 'jpeg', 'webp'),
+            'Responses image tools support raster PNG/JPEG/WebP output only in this helper')
     # Reuse image option checks without sending synthetic generation parameters.
     options = {key: value for key, value in tool.items() if key in FIELDS}
     options.update(prompt='Validate image tool settings', stream=body.get('stream', False))
@@ -707,6 +752,25 @@ def image_bytes(item, timeout):
         return read_limited(response)
 
 
+def output_image_format(data):
+    # Output-only formats must not become accepted edit/upload inputs.
+    if len(data) >= 13 and data[:6] in (b'GIF87a', b'GIF89a'):
+        require(int.from_bytes(data[6:8], 'little') > 0 and int.from_bytes(data[8:10], 'little') > 0,
+                'Invalid GIF dimensions')
+        return 'gif'
+    if data.lstrip().startswith((b'<', b'\xef\xbb\xbf')):
+        try:
+            xml = data.decode('utf-8-sig')
+            require('<!DOCTYPE' not in xml.upper() and '<!ENTITY' not in xml.upper(),
+                    'SVG output must not contain DTDs or entity declarations')
+            root = ET.fromstring(xml)
+        except (UnicodeError, ET.ParseError):
+            raise ValueError('Invalid UTF-8 SVG output') from None
+        require(root.tag in ('svg', '{http://www.w3.org/2000/svg}svg'), 'Returned XML is not SVG')
+        return 'svg'
+    return image_format(data)
+
+
 def save_images(response, run_dir, timeout, model=None, request_id=''):
     data = response.get('data')
     calls, failed_calls = [], []
@@ -725,7 +789,8 @@ def save_images(response, run_dir, timeout, model=None, request_id=''):
     manifest = {'model': model or response_image_model(response), 'request_id': request_id,
                 'run_dir': str(run_dir), 'response_file': str(run_dir / 'response.json'), 'images': []}
     manifest['metadata'] = {key: response[key] for key in
-                            ('created', 'size', 'quality', 'background', 'output_format', 'usage') if key in response}
+                            ('created', 'size', 'quality', 'complexity', 'background', 'output_format',
+                             'frame_count', 'frame_duration_ms', 'usage', 'svg_usage') if key in response}
     if calls:
         manifest['response_id'] = response.get('id')
         manifest['mainline_model'] = response.get('model')
@@ -737,7 +802,7 @@ def save_images(response, run_dir, timeout, model=None, request_id=''):
             if key in item} for item in calls]
     for index, item in enumerate(data, 1):
         content = image_bytes(item, timeout)
-        fmt = image_format(content)
+        fmt = output_image_format(content)
         path = run_dir / ('image-{:02d}.{}'.format(index, fmt))
         with path.open('xb') as handle:
             handle.write(content)
@@ -862,10 +927,11 @@ def prepare_batch(path, endpoint=None):
         image_model = body['tools'][0]['model'] if route == '/v1/responses' else body['model']
         family = known_family(image_model)
         require(not family or PROFILES[family]['image_batch_documented'],
-                'Batch image support is documented for GPT Image 2.5; do not assume support on older families')
+                'Batch image support is documented here only for GPT Image 2.5; do not assume support for 2.6 or older families')
         rows.append(dict(row, body=body))
         ids.add(custom_id)
-        models.add((body['model'], image_model))
+        author = (body['svg']['model'],) if route == '/v1/images/generations' and 'svg' in body else ()
+        models.add((body['model'], image_model) + author)
         routes.add(route)
         require(len(rows) <= 50000, 'Batch exceeds 50,000 requests')
     require(rows and len(routes) == 1 and len(models) == 1, 'A batch requires one endpoint and one model configuration')
@@ -1014,6 +1080,8 @@ def run(args):
     path = {'generate': '/images/generations', 'edit': '/images/edits', 'responses': '/responses'}[args.command]
     image_model = body['tools'][0]['model'] if args.command == 'responses' else body['model']
     required_models = {image_model, body['model']}
+    if args.command == 'generate' and 'svg' in body:
+        required_models.add(body['svg']['model'])
     base = api_base()
     if args.dry_run:
         options = body['tools'][0] if args.command == 'responses' else body
@@ -1023,6 +1091,10 @@ def run(args):
                 'known_profile': known_family(image_model),
                 'n': body.get('n', 1), 'output_format': options.get('output_format', 'png'),
                 'size': options.get('size', 'auto'), 'quality': options.get('quality', 'auto'),
+                'complexity': options.get('complexity'),
+                'svg': options.get('svg'),
+                'frame_count': options.get('frame_count'),
+                'frame_duration_ms': options.get('frame_duration_ms'),
                 'partial_images': options.get('partial_images', 0),
                 'stream': body.get('stream', False),
                 'model_availability_checked': False}

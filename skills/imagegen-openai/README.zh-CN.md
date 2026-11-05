@@ -2,9 +2,17 @@
 
 [English](README.md)
 
-通过 OpenAI 或 OpenAI 兼容供应商生成、编辑栅格图像。涵盖文生图、全局风格转换、多参考图合成、蒙版编辑与扩图、透明背景、GPT Image 2.5 涂鸦 markup、流式预览、Responses 多轮迭代和异步 Batch。
+通过 OpenAI 或 OpenAI 兼容供应商生成、编辑图像。涵盖栅格图像、GPT Image 2.6 SVG/GIF 生成、全局风格转换、多参考图合成、蒙版编辑与扩图、透明背景、GPT Image 2.5/2.6 涂鸦 markup，以及兼容模型的流式预览、Responses 多轮迭代和异步 Batch。
 
-Agent 在提交前实时发现模型并核对能力文档。Sunburst 适合注重编辑精度的任务，Flare 适合快速日常生成；旧模型或陌生模型在确认端点和 schema 后仍可选。模型名称、列表和质量档位均不构成视觉效果保证。
+Agent 在提交前实时发现模型并核对能力文档。Images 请求优先选择 GPT Image 2.6 Sunburst 处理细节与精确编辑，或 GPT Image 2.6 Flare 进行快速迭代；旧模型或陌生模型在确认端点和 schema 后仍可选。模型名称、列表和质量档位均不构成视觉效果保证。
+
+## GPT Image 2.6
+
+Images 请求使用实时发现的 `gpt-image-2.6-sunburst` 或 `gpt-image-2.6-flare`。脚本支持 `complexity: low|medium|high`（API 默认 `high`）、markup 编辑，以及 SVG/GIF 生成。`quality` 使用 `auto|low|medium|high`，不直接继承 2.5 扩展档位。
+
+SVG 设置 `output_format: svg`、`n: 1`；GIF 设置 `output_format: gif`，可选 `frame_count` 和 `frame_duration_ms`。两者均不支持编辑、流式或输出压缩。官方 GIF 范围有差异，脚本暂取交集：2–16 帧、每帧 20–2000 ms；预览权限和像素预算须另行核实。SVG/GIF 按实际格式保存，也可通过 `save` 恢复。完整示例见 [API 参考](references/api.md#gpt-image-26-verified-2026-11-05)。
+
+在已核实文档明确支持前，脚本拒绝已识别的 2.6 模型用于 Responses 或 Batch；这些流程仍需单独选择兼容模型，不会自动替换。
 
 ## 前提与配置
 
@@ -27,7 +35,7 @@ Agent 在提交前实时发现模型并核对能力文档。Sunburst 适合注�
 
 > 用 imagegen-openai 生成透明背景的水彩狐狸，并提供流式预览。
 
-> 根据附带的家具参考图修改这张房间图，保留布局；用蒙版指定椅子区域，或单独用 GPT Image 2.5 的涂鸦标注图指示修改位置。
+> 根据附带的家具参考图修改这张房间图，保留布局；用蒙版指定椅子区域，或单独用 GPT Image 2.6 的涂鸦标注图指示修改位置。
 
 > 通过 Responses 继续编辑上一张图，选择实时可用且文档明确支持图片生成工具的主模型。
 
@@ -43,7 +51,7 @@ python3 scripts/imagegen.py models
 
 ```json
 {
-  "model": "gpt-image-2.5-flare",
+  "model": "gpt-image-2.6-flare",
   "prompt": "A watercolor red fox reading a book, isolated on a transparent background, no text.",
   "size": "1024x1024",
   "quality": "medium",
@@ -63,13 +71,13 @@ python3 scripts/imagegen.py responses --json responses.json --output-dir /absolu
 
 三种请求命令均接受 `--dry-run` 和 `--timeout`。Dry-run 无需密钥、不联网、不发现模型、不写文件，只验证本地请求，不能证明实际可用性。在线提交前再次刷新模型列表；发现失败或任一选定 ID 不存在时停止提交。
 
-编辑使用官方 `images: [{image_url: ...}, {file_id: ...}]` 引用数组，最多 16 张；脚本额外支持本地 `{path: ...}`。`mask` 与 `markup` 使用相同引用格式，二者互斥并作用于第一张源图。本地路径相对请求 JSON 所在目录解析。Markup 必须为带透明像素的 PNG，尺寸须与源图按方向校正后的尺寸一致，且**仅限 2.5**。
+编辑使用官方 `images: [{image_url: ...}, {file_id: ...}]` 引用数组，最多 16 张；脚本额外支持本地 `{path: ...}`。`mask` 与 `markup` 使用相同引用格式，二者互斥并作用于第一张源图。本地路径相对请求 JSON 所在目录解析。Markup 必须为带透明像素的 PNG，尺寸须与源图按方向校正后的尺寸一致，适用于 **2.5/2.6**。
 
 Responses 须显式提供顶层主模型 `model`，以及唯一的 `image_generation` 工具及其 `model`。两个模型均检查实时列表；还须另查主模型是否明确支持图片生成工具。原生 input 支持图片 URL／file ID、此前的 `image_generation_call` 上下文，也可用 `previous_response_id` 延续多轮状态。脚本将本地 `{type: "input_image", path: ...}` 转为 data URL，并默认使用 `tool_choice: {type: "image_generation"}`。该工具的蒙版字段为 `input_image_mask`，**没有 markup 字段**。
 
-选择参数前阅读 [API 参考与 1.5／2／2.5 能力矩阵](references/api.md)：`xhigh`／`max` 和 markup 仅限 2.5；1.5 使用固定尺寸，2／2.5 支持满足限制的自定义尺寸；GPT Image 2 的透明背景为 preview。`input_fidelity` 在 1.5 可调，2／2.5 不传。陌生模型即使在列表中，也须先核实端点和 schema，不能以实际付费请求试错。
+选择参数前阅读 [API 参考、2.6 更新及旧模型能力矩阵](references/api.md)：`xhigh`／`max` 在此仅记录为 2.5 的已核实能力；markup 支持 2.5/2.6。1.5 使用固定尺寸，2／2.5 支持满足限制的自定义尺寸；GPT Image 2 的透明背景为 preview。`input_fidelity` 在 1.5 可调，2／2.5／2.6 不传。陌生模型即使在列表中，也须先核实端点和 schema，不能以实际付费请求试错。
 
-Responses 的 `input_image_mask` 也支持本地 `{path: ...}` 引用。使用蒙版／markup 前，须先检查真实透明像素及源图与覆盖层校正方向后的尺寸。脚本只检查文件签名和可读 PNG 头部／alpha 标记／尺寸，不做完整解码，也不证明真实透明像素或 EXIF 方向正确。Images 蒙版请求会本地拒绝非 PNG 的本地／data URL 源图，须先准备同格式同尺寸的 PNG 源图与蒙版。
+Responses 的 `input_image_mask` 也支持本地 `{path: ...}` 引用。使用蒙版／markup 前，须先检查真实透明像素及源图与覆盖层校正方向后的尺寸。脚本检查文件签名和 PNG 头部／alpha 标记／尺寸，并解码本地 markup 检查透明像素；不检查远程图像像素或 EXIF 方向。Images 蒙版请求会本地拒绝非 PNG 的本地／data URL 源图，须先准备同格式同尺寸的 PNG 源图与蒙版。
 
 需要复用参考图，或图像／蒙版超过 JSON data URL 上限时：
 
@@ -107,4 +115,4 @@ python3 scripts/imagegen.py batch-download --id batch_returned_id --output-dir /
 
 `--endpoint` 可省略，可选值为 `/images/generations`、`/images/edits`、`/responses`。提交前发现所有模型，再通过 multipart 以 `purpose=batch` 上传准备好的 JSONL，随后以 `24h` 完成窗口创建批次。下载保留原始 `output.jsonl`／`error.jsonl`，按 `custom_id` 关联保存图像，不能假设输出顺序与输入一致。仅在用户明确要求取消时使用 `batch-cancel --id ...`。不承诺特定批量折扣或所有兼容供应商均支持 Batch。
 
-官方来源核实日期：**2026-11-04**。完整请求示例、蒙版文件大小与 URL 字符上限的区别、来源链接见 [references/api.md](references/api.md)。
+GPT Image 2.6 来源核实日期：**2026-11-05**；旧模型参考基线：**2026-11-04**。完整请求示例、蒙版文件大小与 URL 字符上限的区别、来源链接见 [references/api.md](references/api.md)。

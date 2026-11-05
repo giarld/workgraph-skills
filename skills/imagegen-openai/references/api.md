@@ -1,6 +1,6 @@
 # Image generation API reference
 
-Official sources were checked on **2026-11-04**. Provider model listings establish availability, not capability. Verify the documented endpoint, schema, model features, and account access before submitting. Never probe an unfamiliar model with paid requests to find out whether it works.
+GPT Image 2.6 sources were checked on **2026-11-05**; the earlier-family reference baseline is **2026-11-04**. Provider model listings establish availability, not capability. Verify the documented endpoint, schema, model features, and account access before submitting. Never probe an unfamiliar model with paid requests to find out whether it works.
 
 ## Routes and commands
 
@@ -30,7 +30,55 @@ python3 scripts/imagegen.py responses --json responses.json --output-dir /absolu
 
 The `models` output includes local `skill_capabilities` annotations for recognized families. These describe the helper’s known profiles, not provider-certified capabilities; unrecognized listed models remain selectable after endpoint/schema verification.
 
-## Capability matrix: check before submission
+## GPT Image 2.6: verified 2026-11-05
+
+Use exact discovered IDs `gpt-image-2.6-sunburst` (detail and precise edits) or `gpt-image-2.6-flare` (fast iteration). No bare `gpt-image-2.6` alias is verified. Namespaces and dated IDs retain their exact provider spelling.
+
+| Setting / route | 2.6 behavior in this helper |
+| --- | --- |
+| Images generation/edit | Supported, retaining JSON/multipart and mask/markup checks |
+| `complexity` | `low`, `medium`, `high`; omitted uses model default `high`. Controls planning independently of rendering quality |
+| `quality` | `auto`, `low`, `medium`, `high`; extended 2.5 tiers are not inferred |
+| Raster output | PNG/JPEG/WebP; explicit transparency needs PNG/WebP |
+| Size | Prefer `auto` or standard raster sizes. Custom dimensions must be positive multiples of 16; provider edge/pixel budgets still need verification. Discovery `custom_size: null` means full limits are not established |
+| Markup / fidelity | Markup supported for Images edits; omit `input_fidelity` |
+| SVG/GIF | Images generation only; see below |
+| Responses / Batch | Known 2.6 IDs are rejected: the checked model pages do not list support, and tool/Batch guides still document older models. Explicitly select a compatible model for those routes |
+
+Lower complexity can suit focused changes; compare higher complexity for dense text/layouts, allowing for more latency and unwanted changes. Do not copy 2/2.5 pixel limits to 2.6 or GIF frames. Dry runs do not establish account access or provider budgets.
+
+Example raster request:
+
+```json
+{"model":"gpt-image-2.6-flare","prompt":"A watercolor fox reading a book.","complexity":"medium","quality":"medium","output_format":"png"}
+```
+
+### SVG and animated GIF generation
+
+Both formats require `generate`, without edits, streaming, nonzero partial previews, or `output_compression`. They are output-only; edit/upload inputs remain PNG/JPEG/WebP. Explicit `background: transparent` remains restricted to PNG/WebP.
+
+```json
+{"model":"gpt-image-2.6-sunburst","prompt":"A simple two-color bakery logo with editable vector shapes.","output_format":"svg","n":1,"complexity":"medium"}
+```
+
+SVG requires `n: 1`. The image model creates a reference, then an author produces SVG. With author-selection access, optionally add `svg: {"model":"<listed-svg-author>","reasoning":{"effort":"medium"}}`; otherwise omit `svg`. Verify author/effort compatibility independently. Live discovery checks the author ID too. Retain `svg_usage` alongside image `usage`; image complexity and author reasoning are separate.
+
+```json
+{"model":"gpt-image-2.6-flare","prompt":"A fox waves one paw and returns to its starting pose in a seamless loop.","output_format":"gif","size":"auto","frame_count":9,"frame_duration_ms":200}
+```
+
+**Documentation discrepancy:** the image guide lists 2–64 frames and 20–2000 ms; the Python generation reference lists 2–16 frames and a minimum of 20 ms with a larger encoded-delay cap. The helper accepts their intersection: 2–16 frames and 20–2000 ms. Omitted values use API defaults of 9 frames and 200 ms; the API rounds delay to 10 ms. These fields are GIF-only. Verify preview access and per-frame/total request pixel budgets. The guide excludes GIF edits even though the Python edit schema exposes GIF fields; this helper follows the generation-only route.
+
+Decode `b64_json` into SVG UTF-8 XML or GIF bytes. Saving and `save` recovery detect the format and retain available usage/animation metadata. SVG parsing checks the root and rejects DTD/entity declarations; GIF checks signature/dimensions. These checks are not a sanitizer, animation decoder, or visual inspection. Inspect SVG rendering and GIF playback before delivery.
+
+2.6 sources checked on **2026-11-05**:
+
+- [Sunburst](https://developers.openai.com/api/docs/models/gpt-image-2.6-sunburst) and [Flare](https://developers.openai.com/api/docs/models/gpt-image-2.6-flare).
+- [Image guide](https://developers.openai.com/api/docs/guides/image-generation): complexity, markup, SVG/GIF workflows and limits.
+- [Python generation reference](https://developers.openai.com/api/reference/python/resources/images/methods/generate) and [edit reference](https://developers.openai.com/api/reference/python/resources/images/methods/edit): request fields and differing GIF constraints.
+- [Batch guide](https://developers.openai.com/api/docs/guides/batch) and [image tool guide](https://developers.openai.com/api/docs/guides/tools-image-generation): no inferred 2.6 support.
+
+## Earlier-family capability matrix: check before submission
 
 This describes official GPT Image families, not a provider availability guarantee. Dated snapshots and provider namespaces retain their exact listed IDs. Consult provider documentation for aliases and other models; do not infer features from an ID alone.
 
@@ -90,7 +138,7 @@ For a compressed opaque asset use `output_format: "jpeg"` or `"webp"`, `output_c
 
 The request file uses `images` (1–16 references), `prompt` and an explicit `model`. Synchronous edit selects its wire encoding with `--transport auto|json|multipart`, default `auto`. All local paths/data URLs (including mask/markup) select multipart; any HTTPS/`file_id` reference selects JSON. Choose explicitly when the provider requires a particular encoding. This decision makes no network request and never falls back after submission. Batch edits continue to use JSON.
 
-Multipart uploads decoded bytes with `image` for a single source or `image[]` for multiple sources, and separate `mask`/`markup` file parts. For gateways that require repeated `image` fields for multiple sources, use `--multipart-image-field image`. Scalar options are form fields; booleans are lowercase `true`/`false`. Remote URLs/file IDs are rejected in explicit multipart mode before discovery or submission; the helper never downloads or uploads them automatically. Local references remain subject to image format, size, dimensions and overlay validation. Output/streaming options remain unchanged, and `input_fidelity` is still omitted for 2/2.5.
+Multipart uploads decoded bytes with `image` for a single source or `image[]` for multiple sources, and separate `mask`/`markup` file parts. For gateways that require repeated `image` fields for multiple sources, use `--multipart-image-field image`. Scalar options are form fields; booleans are lowercase `true`/`false`. Remote URLs/file IDs are rejected in explicit multipart mode before discovery or submission; the helper never downloads or uploads them automatically. Local references remain subject to image format, size, dimensions and overlay validation. Output/streaming options remain unchanged, and `input_fidelity` is still omitted for 2/2.5/2.6.
 
 Use `--dry-run` to inspect the chosen transport. Each live request saves `request.json` (the normalized logical request) and `request-meta.json` (wire transport, content type, and multipart image field); neither contains credentials. Saving responses, streaming previews/final files and error recovery work identically for both transports. Provider support still requires verification: the selected transport is not a capability probe.
 
@@ -147,11 +195,11 @@ python3 scripts/imagegen.py upload --file /absolute/path/source.png --output-dir
 
 `upload` accepts a local PNG/JPEG/WebP file **under 50 MiB** (helper upload limit), validates it, and sends multipart `POST /files` with `purpose=vision`. This helper limit is separate from the guide’s <50 MB source/mask requirement and the JSON URL-character limit; satisfy the requirements for the eventual edit as well. Upload requires the provider key but **no model discovery**, generates no image, and saves the returned File object in `file.json`. Its `id` can be used as `{ "file_id": "file-returned-id" }` for references or masks; markup files must still meet the transparent-PNG/dimension requirements. `--dry-run` checks locally without a key, network, or output writes. Do not upload to a different provider or claim that uploading proves edit-model compatibility.
 
-### GPT Image 2.5 markup
+### GPT Image 2.5/2.6 markup
 
 For local/data-URL markup specifically, the helper decodes PNG pixels (including Adam7 and palette transparency), checks CRCs, and rejects fully opaque overlays before submission. Decoded scanlines are limited to 64 MiB; larger inputs can be uploaded and referenced by file ID after independent inspection. Remote/file references and EXIF orientation still require inspection. Ordinary source images and masks receive the lighter checks described above.
 
-`markup` is a transparent PNG overlay used to point, draw, or annotate on the first source image. It must match that image’s dimensions **after orientation** and contain transparent pixels. Available only for GPT Image 2.5 Images edits. `markup` and `mask` are mutually exclusive; markup is not a binary edit mask.
+`markup` is a transparent PNG overlay used to point, draw, or annotate on the first source image. It must match that image’s dimensions **after orientation** and contain transparent pixels. Available for GPT Image 2.5/2.6 Images edits. `markup` and `mask` are mutually exclusive; markup is not a binary edit mask.
 
 ```json
 {
@@ -176,7 +224,7 @@ The current official tool schema contains:
 | `background`, `size`, `quality`, `output_format`, `output_compression`, `moderation` | Same documented output meanings; family constraints still apply |
 | `partial_images` | Integer 0–3; Responses `stream` stays at the top level |
 | `input_image_mask` | Native mask object using `file_id` or `image_url`; the schema describes `image_url` as a base64 mask. The helper also accepts `{ "path": "mask.png" }` and converts it to a data URL |
-| `input_fidelity` | Supported older-model setting only; omit for 2/2.5 |
+| `input_fidelity` | Supported older-model setting only; omit for 2/2.5/2.6 |
 
 There is **no `markup`, `images`, `mask`, `n`, `prompt`, or `stream` field in this tool schema**. Put textual/image content in top-level `input`. Put `safety_identifier` at request level, not inside the tool. Use the Images edits route if markup is needed.
 
