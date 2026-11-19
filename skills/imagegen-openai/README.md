@@ -4,20 +4,20 @@
 
 Generate and edit images through OpenAI or an OpenAI-compatible provider. Workflows include raster images, GPT Image 2.6 SVG/GIF generation, global restyling, multiple reference images, masked edits and outpainting, transparent assets, GPT Image 2.5/2.6 markup overlays, and streaming, Responses iteration, or Batch requests on compatible models.
 
-The agent discovers live models before submission and checks their documented capabilities. For Images requests, prefer GPT Image 2.6 Sunburst for detail and precise edits, or GPT Image 2.6 Flare for fast iteration. Available older or unfamiliar models remain selectable after endpoint/schema verification. No model name, listing, or quality setting guarantees a particular visual result.
+Choose the provider and endpoint first, then verify the required features for the exact model ID. A catalog entry confirms that an ID is listed, not what that deployment can do. Keep a user's explicit choice unchanged when it meets the requirements, and do not infer capabilities or quality from a model name or version.
 
 ## GPT Image 2.6
 
-Use discovered IDs `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare` for Images requests. The helper adds `complexity: low|medium|high` (API default `high`), markup edits, and SVG/GIF generation. Use `quality: auto|low|medium|high`; extended 2.5 tiers are not assumed.
+On the official OpenAI API, use `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare` when the account and route support them. The helper supports `complexity: low|medium|high`, markup edits, and SVG/GIF generation. Official 2.6 quality settings are `auto|low|medium|high`; extended 2.5 tiers are not assumed. A gateway alias with the same name does not inherit these rules.
 
-SVG requires `output_format: svg` and `n: 1`; GIF uses `output_format: gif` with optional `frame_count` and `frame_duration_ms`. Neither supports edits, streaming, or compression. Conservative GIF limits are 2–16 frames and 20–2000 ms because official pages differ; verify preview access and pixel budgets. Outputs retain their actual extensions and support `save` recovery. See [examples and compatibility details](references/api.md#gpt-image-26-verified-2026-11-05).
+SVG requires `output_format: svg` and `n: 1`; GIF uses `output_format: gif` with optional `frame_count` and `frame_duration_ms`. Neither supports edits, streaming, or compression. Conservative GIF limits are 2–16 frames and 20–2000 ms because official pages differ; verify preview access and pixel budgets. Outputs retain their actual extensions and support `save` recovery. See [examples and compatibility details](references/api.md#gpt-image-26-helper-profile).
 
-Known 2.6 models are rejected on Responses and Batch routes until support is documented. Select compatible models separately; there is no automatic substitution.
+Official Responses accepts 2.6 as the image tool model on the raster path supported by the helper. Verify that the mainline model can call the tool. Check Batch support separately: the local profile for the direct OpenAI Images Batch routes covers 2.5.
 
 ## Requirements and configuration
 
 - Python 3.8+, standard library only; no SDK installation.
-- Bearer authentication and `GET /models`, plus the endpoint needed for the task: Images generations/edits, Responses, or Files and Batches. A compatible provider may implement only some routes.
+- Bearer authentication and the endpoint needed for the task: Images generations/edits, Responses, or Files and Batches. The helper checks `GET /models` by default; a compatible provider may implement only some routes.
 - Configure environment inputs in the skill host or execution environment:
 
 | Variable | Required | Default |
@@ -25,7 +25,7 @@ Known 2.6 models are rejected on Responses and Batch routes until support is doc
 | `IMAGEGEN_OPENAI_API_BASE_URL` | No | `https://api.openai.com/v1` |
 | `IMAGEGEN_OPENAI_API_KEY` | For live provider requests | None; secret |
 
-Use the complete API base, including `/v1` when required. The helper removes trailing slashes without adding another version segment. Empty or invalid overrides fail without provider switching. Configure the key through settings; do not paste it into chat or commit it. These are the only declared settings; models are selected from the live catalog.
+Use the complete API base, including `/v1` when required. The helper removes trailing slashes without adding another version segment. Empty or invalid overrides fail without provider switching. Configure the key through settings; do not paste it into chat or commit it. The request file specifies the exact model ID.
 
 `config.json` declares repository format v1 inputs without storing values. The key is conditionally required for live requests, so its declaration has `required: false`. Local dry runs and saving a stored response need no key. Saving compatible URL output can still require network access. Host parsing/environment injection must be verified in the actual OpenWorkgraph installation.
 
@@ -47,7 +47,7 @@ From this skill directory:
 python3 scripts/imagegen.py models
 ```
 
-Create UTF-8 JSON without BOM. Replace the example model with an exact returned ID whose endpoint capabilities match the request:
+Create UTF-8 JSON without BOM. Replace the example model with the exact ID verified for the configured provider and route. On a compatible endpoint, start with the smallest documented request and add only the options you need: the helper does not inject `n`, `output_format`, or Responses `tool_choice`.
 
 ```json
 {
@@ -69,13 +69,13 @@ python3 scripts/imagegen.py edit --json edit.json --output-dir /absolute/path/ou
 python3 scripts/imagegen.py responses --json responses.json --output-dir /absolute/path/outputs --timeout 300
 ```
 
-All three request commands accept `--dry-run` and `--timeout`. Dry runs validate locally without a key, network calls, discovery, or output writes; they do not establish model access. Live submission refreshes the model list and stops if discovery fails or any selected ID is absent.
+All three request commands accept `--dry-run` and `--timeout`. Dry runs need no key, network, or output writes and do not establish access. By default, live submission stops if discovery fails or a required ID is absent. For a compatible provider with a documented missing or incomplete catalog, `generate`, `edit`, `responses`, and `batch-submit` accept `--skip-model-discovery` after the exact IDs, capabilities, and access have been independently verified. Do not use it for unexplained, authentication, or rate-limit failures. It is unavailable on the official OpenAI API. The dry-run output and `request-meta.json` record the selected IDs and catalog-check status.
 
 Edits use native `images: [{image_url: ...}, {file_id: ...}]` references (1–16 images), plus the helper’s `{path: ...}` local extension. `mask` and `markup` use the same reference format, are mutually exclusive, and target the first source image. Local paths resolve against the request JSON. A markup overlay must be a transparent PNG with matching oriented dimensions and is supported on **2.5/2.6**.
 
-Responses requires an explicit top-level mainline `model` and exactly one `image_generation` tool with explicit `model`. Both are checked against the live list; additionally verify the mainline model’s documented tool support. Native input supports image URLs/file IDs and earlier `image_generation_call` context; `previous_response_id` carries conversational state. The helper converts local `{type: "input_image", path: ...}` into a data URL and defaults `tool_choice` to `{type: "image_generation"}`. Its tool schema has `input_image_mask` and **no markup field**.
+Responses requires an explicit top-level mainline `model` and exactly one `image_generation` tool with its own explicit `model`. Verify both roles and the provider's tool support. Native input supports image URLs/file IDs and earlier `image_generation_call` context; `previous_response_id` carries conversational state. The helper converts local `{type: "input_image", path: ...}` into a data URL. It defaults `tool_choice` to `{type: "image_generation"}` only on the official OpenAI API. The tool schema has `input_image_mask` and no markup field.
 
-Read the [API reference and 2.6 update and earlier-family capability matrix](references/api.md) before choosing settings. In particular, `xhigh`/`max` remain documented here for 2.5; markup supports 2.5/2.6; 1.5 has fixed sizes while 2/2.5 allow constrained custom dimensions; GPT Image 2 transparency is preview. `input_fidelity` is adjustable on 1.5 and must be omitted for 2/2.5/2.6. Unknown listed models require documented endpoint/schema verification before submission.
+Read the [API reference and model profiles](references/api.md) before choosing settings. Its GPT Image family rules apply to the official OpenAI API, not to same-name models behind gateways. For instance, `input_fidelity` is adjustable on official 1.5 but omitted for official 2/2.5/2.6. Verify the endpoint and request schema for unfamiliar IDs before submitting.
 
 The Responses `input_image_mask` also supports a local `{path: ...}` reference. Before using masks or markup, inspect real transparency and oriented source/overlay dimensions. The helper checks file signatures and PNG headers/alpha/dimensions, and decodes local markup to verify transparent pixels. It does not inspect remote image pixels or verify EXIF orientation. For Images masks, non-PNG local/data-URL source images are locally rejected; prepare matching PNG source and mask.
 
@@ -100,7 +100,7 @@ Save an existing native Images or Responses response without generating again:
 python3 scripts/imagegen.py save --response /absolute/path/run/response.json --output-dir /absolute/path/recovered
 ```
 
-Keep sibling response metadata for tracing. There are no automatic retries, provider/model fallbacks, or replacement requests for missing images. Incomplete responses, failed/interrupted streams, and timeouts require investigation; a submission may already have incurred a charge. Compatible image URL downloads receive no API key and do not follow redirects.
+Keep sibling response metadata for tracing. There are no automatic retries, provider/model fallbacks, or replacement requests for missing images. Incomplete responses, failed/interrupted streams, and timeouts require investigation; a submission may already have incurred a charge. Compatible image URL downloads receive no API key and do not follow redirects. On Windows, run folders inherit the permissions of the chosen output directory; choose a private directory for sensitive artifacts.
 
 ## Batch
 
@@ -113,6 +113,6 @@ python3 scripts/imagegen.py batch-status --id batch_returned_id
 python3 scripts/imagegen.py batch-download --id batch_returned_id --output-dir /absolute/path/batch-results
 ```
 
-`--endpoint` is optional and accepts `/images/generations`, `/images/edits`, or `/responses`. Submission discovers all models before multipart upload of the prepared JSONL with `purpose=batch` and creation of a batch with the `24h` completion window. Download retains raw `output.jsonl`/`error.jsonl` and associates images with `custom_id`; result order is not input order. Cancel only on an explicit user request with `batch-cancel --id ...`. No batch discount or universal provider support is promised.
+`--endpoint` is optional and accepts `/images/generations`, `/images/edits`, or `/responses`. The helper checks all required models before upload unless catalog discovery was explicitly skipped. It uploads the prepared JSONL with `purpose=batch` and creates a batch with the `24h` completion window. Download retains raw `output.jsonl`/`error.jsonl` and associates images with `custom_id`; result order is not input order. Cancel only on an explicit user request with `batch-cancel --id ...`. No batch discount or universal provider support is promised.
 
-GPT Image 2.6 source verification: **2026-11-05**; earlier-family reference baseline: **2026-11-04**. Full request examples, mask/file-size versus URL-character limits, and source links are in [references/api.md](references/api.md).
+See [references/api.md](references/api.md) for the current helper profiles, request examples, media limits, and source links.

@@ -1,10 +1,10 @@
 # Image generation API reference
 
-GPT Image 2.6 sources were checked on **2026-11-05**; the earlier-family reference baseline is **2026-11-04**. Provider model listings establish availability, not capability. Verify the documented endpoint, schema, model features, and account access before submitting. Never probe an unfamiliar model with paid requests to find out whether it works.
+The model notes below describe validation profiles for direct requests to the official OpenAI API. They do not describe models behind a gateway, even if their IDs match. Verify the selected provider's current endpoint, schema, model features, and account access before submitting.
 
 ## Routes and commands
 
-Append paths to the configured complete API base; do not add a second version segment. Bearer authentication applies to provider API requests. Discovery uses `GET /models` and retains all returned IDs; there is no model allowlist or mainline-model default. Model-like names and annotations are advisory.
+Append paths to the configured complete API base; do not add a second version segment. Provider requests use Bearer authentication. This helper implements the paths and wire formats below; it does not adapt Chat Completions, provider-specific image endpoints, or authentication that requires a different header.
 
 | Command | Endpoint / purpose |
 | --- | --- |
@@ -14,10 +14,10 @@ Append paths to the configured complete API base; do not add a second version se
 | `responses` | `POST /responses`; conversational image tool use |
 | `save` | Decode a stored native Images or Responses response without generation |
 | `upload` | `POST /files`, multipart `purpose=vision`; obtain a reusable image file ID without model discovery |
-| `batch-submit` | Discover models, upload JSONL to `POST /files`, then `POST /batches` |
+| `batch-submit` | Check model selection, upload JSONL to `POST /files`, then `POST /batches` |
 | `batch-status` / `batch-download` / `batch-cancel` | Inspect, download, or explicitly cancel an existing batch |
 
-The examples below run from the skill directory. Replace example image-model IDs with exact IDs from the live catalog. Replace Responses main-model placeholders with a listed mainline model whose official model page confirms image generation tool support; the tool model must also be listed. GPT Image models belong in `tools[0].model`, not in the Responses top-level `model`.
+The examples below run from the skill directory. Replace example IDs with the configured provider's exact IDs for the intended route. For Responses, the top-level `model` is the mainline model that can call the image tool, and `tools[0].model` is the image model.
 
 ```bash
 python3 scripts/imagegen.py models
@@ -26,11 +26,19 @@ python3 scripts/imagegen.py generate --json request.json --output-dir /absolute/
 python3 scripts/imagegen.py edit --json edit.json --output-dir /absolute/path/outputs
 python3 scripts/imagegen.py responses --json responses.json --output-dir /absolute/path/outputs
 ```
-`generate`, `edit`, and `responses` require `--json` and `--output-dir` and accept `--dry-run` and `--timeout` (seconds; default 300). Dry runs need no key and perform no discovery, network request, or file write; local file references are still checked. Live submission refreshes the catalog and checks every selected model. Discovery failure stops submission. For Responses, presence in the catalog does not establish tool support: check documentation as well.
+`generate`, `edit`, and `responses` require `--json` and `--output-dir` and accept `--dry-run` and `--timeout` (seconds; default 300). Dry runs need no key and perform no discovery, network request, or file write; local file references are still checked.
 
-The `models` output includes local `skill_capabilities` annotations for recognized families. These describe the helper’s known profiles, not provider-certified capabilities; unrecognized listed models remain selectable after endpoint/schema verification.
+### Provider profiles and discovery
 
-## GPT Image 2.6: verified 2026-11-05
+- `models` returns the provider's catalog rows under `models` without injecting annotations into those rows. The separate `openai_profiles` map contains local hints for recognized exact IDs only on `https://api.openai.com/v1` (the default HTTPS port). An empty map is not evidence that image generation is unavailable. A catalog lists IDs, not route support or permission to submit.
+- Keep case, aliases, namespaces, deployment names, and snapshot suffixes exactly as documented for the selected provider. For other bases the helper does not apply model-family restrictions or inject OpenAI defaults for `n`, `output_format`, or Responses `tool_choice`. Its supported routes, fields, and file formats still apply.
+- Before a live submission, the helper fetches `GET /models` and checks every required exact ID, including any separate mainline, image tool, or SVG author ID. Discovery errors or missing IDs stop submission; there is no automatic retry or fallback.
+- If a compatible provider documents a missing or incomplete catalog, `generate`, `edit`, `responses`, and `batch-submit` accept `--skip-model-discovery` for known explicit IDs. Verify route, schema, capabilities and account access independently. Use the flag deliberately, not in response to unexplained, authentication, or rate-limit failures. Official OpenAI requests cannot use it.
+- Dry-run output and live `request-meta.json` include `model_selection`: provider profile, required model IDs, and `catalog_check` (`pending` during a default dry run, `verified` after a successful live catalog check, or `skipped` for the explicit opt-out).
+
+For example, on a compatible gateway with a documented deployment ID and no catalog, set `model` in `request.json` to the exact deployment ID and validate locally with `python scripts/imagegen.py generate --json request.json --output-dir outputs --skip-model-discovery --dry-run`.
+
+## GPT Image 2.6 helper profile
 
 Use exact discovered IDs `gpt-image-2.6-sunburst` (detail and precise edits) or `gpt-image-2.6-flare` (fast iteration). No bare `gpt-image-2.6` alias is verified. Namespaces and dated IDs retain their exact provider spelling.
 
@@ -43,7 +51,8 @@ Use exact discovered IDs `gpt-image-2.6-sunburst` (detail and precise edits) or 
 | Size | Prefer `auto` or standard raster sizes. Custom dimensions must be positive multiples of 16; provider edge/pixel budgets still need verification. Discovery `custom_size: null` means full limits are not established |
 | Markup / fidelity | Markup supported for Images edits; omit `input_fidelity` |
 | SVG/GIF | Images generation only; see below |
-| Responses / Batch | Known 2.6 IDs are rejected: the checked model pages do not list support, and tool/Batch guides still document older models. Explicitly select a compatible model for those routes |
+| Responses | OpenAI lists Sunburst and Flare as image tool models. Verify the mainline model and use the Responses tool schema; Images-specific fields are not inherited |
+| Batch | The direct OpenAI Images Batch profile covers 2.5. Verify both models and the Responses tool combination separately for Responses Batch |
 
 Lower complexity can suit focused changes; compare higher complexity for dense text/layouts, allowing for more latency and unwanted changes. Do not copy 2/2.5 pixel limits to 2.6 or GIF frames. Dry runs do not establish account access or provider budgets.
 
@@ -76,7 +85,7 @@ Decode `b64_json` into SVG UTF-8 XML or GIF bytes. Saving and `save` recovery de
 - [Sunburst](https://developers.openai.com/api/docs/models/gpt-image-2.6-sunburst) and [Flare](https://developers.openai.com/api/docs/models/gpt-image-2.6-flare).
 - [Image guide](https://developers.openai.com/api/docs/guides/image-generation): complexity, markup, SVG/GIF workflows and limits.
 - [Python generation reference](https://developers.openai.com/api/reference/python/resources/images/methods/generate) and [edit reference](https://developers.openai.com/api/reference/python/resources/images/methods/edit): request fields and differing GIF constraints.
-- [Batch guide](https://developers.openai.com/api/docs/guides/batch) and [image tool guide](https://developers.openai.com/api/docs/guides/tools-image-generation): no inferred 2.6 support.
+- [Batch guide](https://developers.openai.com/api/docs/guides/batch) and [image tool guide](https://developers.openai.com/api/docs/guides/tools-image-generation): check the provider's current route and model support.
 
 ## Earlier-family capability matrix: check before submission
 
@@ -102,7 +111,7 @@ Sunburst is documented for editing precision; Flare for fast everyday generation
 
 | Field | Values / behavior |
 | --- | --- |
-| `model` | Required by the helper; exact currently listed ID with documented endpoint support |
+| `model` | Required by the helper; exact provider ID with documented endpoint support |
 | `prompt` | Nonempty text, maximum 32,000 characters |
 | `n` | Integer 1–10; default 1; multiple outputs are one synchronous request, not Batch |
 | `size` / `quality` | See matrix; omitted/`auto` lets the provider select |
@@ -138,7 +147,7 @@ For a compressed opaque asset use `output_format: "jpeg"` or `"webp"`, `output_c
 
 The request file uses `images` (1–16 references), `prompt` and an explicit `model`. Synchronous edit selects its wire encoding with `--transport auto|json|multipart`, default `auto`. All local paths/data URLs (including mask/markup) select multipart; any HTTPS/`file_id` reference selects JSON. Choose explicitly when the provider requires a particular encoding. This decision makes no network request and never falls back after submission. Batch edits continue to use JSON.
 
-Multipart uploads decoded bytes with `image` for a single source or `image[]` for multiple sources, and separate `mask`/`markup` file parts. For gateways that require repeated `image` fields for multiple sources, use `--multipart-image-field image`. Scalar options are form fields; booleans are lowercase `true`/`false`. Remote URLs/file IDs are rejected in explicit multipart mode before discovery or submission; the helper never downloads or uploads them automatically. Local references remain subject to image format, size, dimensions and overlay validation. Output/streaming options remain unchanged, and `input_fidelity` is still omitted for 2/2.5/2.6.
+Multipart uploads decoded bytes with `image` for a single source or `image[]` for multiple sources, and separate `mask`/`markup` file parts. For gateways that require repeated `image` fields for multiple sources, use `--multipart-image-field image`. Scalar options are form fields; booleans are lowercase `true`/`false`. Remote URLs/file IDs are rejected in explicit multipart mode before discovery or submission; the helper never downloads or uploads them automatically. Local references remain subject to image format, size, dimensions and overlay validation. On official GPT Image 2/2.5/2.6 requests omit `input_fidelity`; on gateways use the documented options for that deployment.
 
 Use `--dry-run` to inspect the chosen transport. Each live request saves `request.json` (the normalized logical request) and `request-meta.json` (wire transport, content type, and multipart image field); neither contains credentials. Saving responses, streaming previews/final files and error recovery work identically for both transports. Provider support still requires verification: the selected transport is not a capability probe.
 
@@ -212,9 +221,9 @@ For local/data-URL markup specifically, the helper decodes PNG pixels (including
 ```
 ## Responses: mainline model plus image tool
 
-Send native Responses input, not an Images request wrapped in a tool. The helper requires explicit top-level `model` and **exactly one** `image_generation` tool with explicit `model`. Both IDs must be returned by current discovery. Verify the mainline model’s official tool support separately. A model being listed, newer, or accepting image inputs does not alone prove it can call the image generation tool. The helper defaults `tool_choice` to `{ "type": "image_generation" }` when omitted.
+Send native Responses input, not an Images request wrapped in a tool. The helper requires explicit top-level `model` and **exactly one** `image_generation` tool with explicit `model`. Verify the provider documents both roles and the tool accepts the chosen image model. A model being listed, newer, or accepting image inputs does not alone prove it can call the image generation tool. On the official OpenAI API the helper defaults `tool_choice` to `{ "type": "image_generation" }`; on compatible bases it sends only an explicitly provided choice.
 
-The current official tool schema contains:
+The helper supports these fields from the official image tool schema, with raster output only:
 
 | Tool field | Meaning |
 | --- | --- |
@@ -222,6 +231,7 @@ The current official tool schema contains:
 | `model` | Explicit image model; not the top-level mainline model |
 | `action` | `auto` (default), `generate`, `edit`; `edit` needs an image in context |
 | `background`, `size`, `quality`, `output_format`, `output_compression`, `moderation` | Same documented output meanings; family constraints still apply |
+| `complexity` | `low`, `medium`, `high` for models that document this option, including GPT Image 2.6 |
 | `partial_images` | Integer 0–3; Responses `stream` stays at the top level |
 | `input_image_mask` | Native mask object using `file_id` or `image_url`; the schema describes `image_url` as a base64 mask. The helper also accepts `{ "path": "mask.png" }` and converts it to a data URL |
 | `input_fidelity` | Supported older-model setting only; omit for 2/2.5/2.6 |
@@ -287,7 +297,7 @@ Recovery distinguishes completed image calls from overall Responses completion. 
 
 ## Batch: asynchronous Images or Responses requests
 
-The official Batch guide explicitly supports GPT Image 2.5 Sunburst/Flare and their `2026-09-08` snapshots on `/v1/images/generations` and `/v1/images/edits`. Do not assume 1.5/2 Batch image support. Batch `/v1/responses` additionally requires a documented Batch-capable mainline model and compatible image generation tool; verify both, not just their presence in the model catalog. Never infer a provider’s Batch support from its synchronous endpoints.
+For `/v1/images/generations` and `/v1/images/edits`, the helper accepts GPT Image 2.5 Sunburst/Flare and their snapshots among its known model families. Batch `/v1/responses` additionally requires a documented Batch-capable mainline model and compatible image generation tool; verify both, not just their presence in the model catalog. Never infer a provider’s Batch support from its synchronous endpoints.
 
 Each UTF-8 JSONL line is a standard request with unique `custom_id`, `method: "POST"`, `url`, and endpoint `body`. A file targets one endpoint and a **single model**; for Responses keep the same mainline model and explicit image tool model throughout. At most **50,000 requests / 200 MB** per input file. The helper reuses edit/Responses preparation: local image, mask, and markup `path` extensions are supported and resolve relative to **the JSONL file’s directory** before conversion to native data URLs. Both input and expanded JSONL must fit the upload limit; native HTTPS/file-ID references can avoid base64 expansion. Do not stream Batch requests.
 
@@ -303,7 +313,7 @@ python3 scripts/imagegen.py batch-submit --jsonl requests.jsonl --output-dir /ab
 python3 scripts/imagegen.py batch-status --id batch_returned_id
 python3 scripts/imagegen.py batch-download --id batch_returned_id --output-dir /absolute/path/batch-results
 ```
-The optional CLI `--endpoint` accepts `/images/generations`, `/images/edits`, or `/responses`; native official JSONL `url` values include `/v1` as shown. Submission validates the file, discovers **all** referenced models before upload, uploads the prepared JSONL as `input.jsonl` via multipart `/files` with `purpose=batch`, then creates a batch at `/batches` using its `input_file_id` and `completion_window: "24h"`. This is asynchronous, not a promise that every request succeeds. Do not promise a batch price or discount from a generic Batch headline; consult current image-specific pricing and provider terms when asked.
+The optional CLI `--endpoint` accepts `/images/generations`, `/images/edits`, or `/responses`; the helper requires JSONL `url` values with `/v1` as shown. Submission validates the file, applies the catalog check before any upload unless explicitly skipped as described above, uploads the prepared JSONL as `input.jsonl` via multipart `/files` with `purpose=batch`, then creates a batch at `/batches` using its `input_file_id` and `completion_window: "24h"`. Consult the provider's model-specific Batch support and terms before submission.
 
 Inspect status by ID. Download available provider output/error files and retain raw `output.jsonl` and `error.jsonl`; decode successful native Images/Responses bodies and associate saved images with `custom_id`. Output order can differ from input order. Report per-request errors, missing or expired items, and incomplete responses without automatic resubmission. Existing-batch status/download do not require model rediscovery.
 

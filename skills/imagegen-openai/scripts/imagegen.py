@@ -23,6 +23,7 @@ import zlib
 BASE_ENV = 'IMAGEGEN_OPENAI_API_BASE_URL'
 KEY_ENV = 'IMAGEGEN_OPENAI_API_KEY'
 DEFAULT_BASE = 'https://api.openai.com/v1'
+USER_AGENT = 'imagegen-openai/1.0'
 FAMILIES_26 = ('gpt-image-2.6-sunburst', 'gpt-image-2.6-flare')
 FAMILIES = FAMILIES_26 + ('gpt-image-2.5-sunburst', 'gpt-image-2.5-flare',
             'gpt-image-2', 'gpt-image-1.5')
@@ -33,7 +34,7 @@ PROFILES = {family: {
     'markup': '2.5' in family or family in FAMILIES_26,
     'complexity': ['low', 'medium', 'high'] if family in FAMILIES_26 else [],
     'output_formats': ['png', 'jpeg', 'webp'] + (['svg', 'gif'] if family in FAMILIES_26 else []),
-    'responses_documented': family not in FAMILIES_26,
+    'responses_image_tool_documented': True,
     'transparent_background': 'preview' if family == 'gpt-image-2' else 'supported',
     'image_batch_documented': '2.5' in family,
     'generation': True, 'editing': True, 'streaming': True,
@@ -45,7 +46,7 @@ FIELDS = {'model', 'prompt', 'n', 'size', 'quality', 'output_format',
 EDIT_FIELDS = {'images', 'mask', 'markup', 'input_fidelity'}
 TOOL_FIELDS = {'type', 'model', 'action', 'background', 'input_fidelity',
                'input_image_mask', 'moderation', 'output_compression',
-               'output_format', 'partial_images', 'quality', 'size'}
+               'output_format', 'partial_images', 'quality', 'size', 'complexity'}
 MAX_RESPONSE_BYTES = 256 * 1024 * 1024
 MAX_IMAGE_URL = 20971520
 
@@ -87,10 +88,19 @@ def sanitized(value):
     return text.replace(key, '[REDACTED]') if key else text
 
 
-def known_family(model):
-    tail = model.rsplit('/', 1)[-1]
+def provider_profile(base):
+    url = http_url(base)
+    if (url.scheme == 'https' and url.hostname == 'api.openai.com'
+            and url.port in (None, 443) and url.path == '/v1'):
+        return 'openai'
+    return 'compatible'
+
+
+def known_family(model, provider):
+    if provider != 'openai':
+        return None
     for family in FAMILIES:
-        if tail == family or re.fullmatch(re.escape(family) + r'-\d{4}-\d{2}-\d{2}', tail):
+        if model == family or re.fullmatch(re.escape(family) + r'-\d{4}-\d{2}-\d{2}', model):
             return family
     return None
 
@@ -102,15 +112,15 @@ def validate_stream(body):
     require(not partial or body.get('stream', False), 'partial_images requires stream=true')
 
 
-def validate_fidelity(body):
+def validate_fidelity(body, provider):
     if 'input_fidelity' in body:
         require(body['input_fidelity'] in ('low', 'high'), 'Invalid input_fidelity')
-        family = known_family(body['model'])
+        family = known_family(body['model'], provider)
         require(not family or family == 'gpt-image-1.5',
                 'Omit input_fidelity for GPT Image 2/2.5/2.6; this is not a configurable fidelity tier')
 
 
-def validate(body, editing=False):
+def validate(body, provider, editing=False):
     require(isinstance(body, dict), 'Request must be a JSON object')
     require(set(body) <= FIELDS | (EDIT_FIELDS if editing else set()),
             'Request contains unsupported fields; see references/api.md')
@@ -120,11 +130,13 @@ def validate(body, editing=False):
     require(isinstance(prompt, str) and prompt.strip() and len(prompt) <= 32000,
             'prompt must contain 1–32000 characters')
     body = dict(body)
-    family = known_family(body['model'])
-    body.setdefault('n', 1)
-    body.setdefault('output_format', 'png')
-    require(type(body['n']) is int and 1 <= body['n'] <= 10, 'n must be an integer from 1 to 10')
-    fmt = body['output_format']
+    family = known_family(body['model'], provider)
+    if provider == 'openai':
+        body.setdefault('n', 1)
+        body.setdefault('output_format', 'png')
+    n = body.get('n', 1)
+    require(type(n) is int and 1 <= n <= 10, 'n must be an integer from 1 to 10')
+    fmt = body.get('output_format', 'png')
     require(fmt in ('png', 'jpeg', 'webp', 'svg', 'gif'), 'Invalid output_format')
     if family:
         require(fmt in PROFILES[family]['output_formats'], 'Unsupported output format for the known model family')
@@ -136,13 +148,13 @@ def validate(body, editing=False):
         require(not body.get('stream') and not body.get('partial_images'), 'SVG/GIF output cannot stream or return partial images')
         require('output_compression' not in body, 'SVG/GIF output does not support output_compression')
     if fmt == 'svg':
-        require(body['n'] == 1, 'SVG output requires n=1')
+        require(n == 1, 'SVG output requires n=1')
     if 'svg' in body:
         svg = body['svg']
         require(fmt == 'svg' and isinstance(svg, dict) and set(svg) <= {'model', 'reasoning'},
                 'svg options require output_format=svg and only model/reasoning fields')
         require(isinstance(svg.get('model'), str) and svg['model'].strip(), 'svg.model is required when selecting an SVG author')
-        require(known_family(svg['model']) is None, 'svg.model must be an SVG author, not a GPT Image model')
+        require(known_family(svg['model'], provider) is None, 'svg.model must be an SVG author, not a GPT Image model')
         reasoning = svg.get('reasoning')
         if reasoning is not None:
             require(isinstance(reasoning, dict) and set(reasoning) <= {'effort'}, 'Invalid SVG reasoning object')
@@ -155,11 +167,11 @@ def validate(body, editing=False):
         require(fmt == 'gif' and type(body['frame_duration_ms']) is int and 20 <= body['frame_duration_ms'] <= 2000,
                 'frame_duration_ms requires GIF output and an integer from 20 to 2000')
     require(body.get('background', 'auto') in ('auto', 'opaque', 'transparent'), 'Invalid background')
-    require(body.get('background') != 'transparent' or body['output_format'] in ('png', 'webp'),
+    require(body.get('background') != 'transparent' or fmt in ('png', 'webp'),
             'Transparent backgrounds require PNG or WebP')
     if 'output_compression' in body:
         require(type(body['output_compression']) is int and 0 <= body['output_compression'] <= 100
-                and body['output_format'] in ('jpeg', 'webp'),
+                and fmt in ('jpeg', 'webp'),
                 'output_compression requires JPEG/WebP and an integer from 0 to 100')
     require(body.get('moderation', 'auto') in ('auto', 'low'), 'Invalid moderation')
     if 'safety_identifier' in body:
@@ -170,14 +182,12 @@ def validate(body, editing=False):
         require(isinstance(body['user'], str), 'user must be a string; prefer safety_identifier')
     validate_stream(body)
     if editing:
-        validate_fidelity(body)
+        validate_fidelity(body, provider)
         require(isinstance(body.get('images'), list) and 1 <= len(body['images']) <= 16,
                 'Edit requires 1–16 images')
         require(not ('mask' in body and 'markup' in body), 'mask and markup cannot be combined')
         if 'markup' in body:
-            family = known_family(body['model'])
             require(not family or PROFILES[family]['markup'], 'markup requires GPT Image 2.5/2.6')
-    family = known_family(body['model'])
     quality = body.get('quality', 'auto')
     require(isinstance(quality, str) and quality.strip(), 'quality must be a nonempty string')
     if family:
@@ -407,8 +417,8 @@ def image_ref(ref, root, overlay=False, json_limit=True):
     return {field: value}, png_info(data)[:2] if data is not None and image_format(data) == 'png' else None
 
 
-def prepare_edit(body, root, transport='json'):
-    body = validate(body, editing=True)
+def prepare_edit(body, root, provider, transport='json'):
+    body = validate(body, provider, editing=True)
     refs = [image_ref(ref, root, json_limit=transport != 'multipart') for ref in body['images']]
     body['images'] = [ref for ref, _ in refs]
     first_url = body['images'][0].get('image_url', '')
@@ -422,8 +432,8 @@ def prepare_edit(body, root, transport='json'):
     return body
 
 
-def edit_transport(body, requested):
-    body = validate(body, editing=True)
+def edit_transport(body, requested, provider):
+    body = validate(body, provider, editing=True)
     refs = body['images'] + [body[field] for field in ('mask', 'markup') if field in body]
     inline = all(isinstance(ref, dict) and len(ref) == 1 and
                  ('path' in ref or isinstance(ref.get('image_url'), str)
@@ -466,11 +476,12 @@ def multipart_edit(body, image_field=None):
     return b''.join(parts), 'multipart/form-data; boundary=' + boundary
 
 
-def prepare_responses(body, root):
+def prepare_responses(body, root, provider):
     require(isinstance(body, dict), 'Request must be a JSON object')
     body = dict(body)
     require(isinstance(body.get('model'), str) and body['model'].strip(), 'An explicit mainline model is required')
-    require(known_family(body['model']) is None, 'Responses top-level model must be a mainline model, not GPT Image')
+    require(known_family(body['model'], provider) is None,
+            'Responses top-level model must be a mainline model, not GPT Image')
     require('input' in body and isinstance(body['input'], (str, list)) and body['input'],
             'Responses requires a nonempty input string or array')
     tools = body.get('tools')
@@ -479,20 +490,19 @@ def prepare_responses(body, root):
     tool = dict(tools[0])
     require(set(tool) <= TOOL_FIELDS, 'Unsupported image_generation tool field; see references/api.md')
     require(isinstance(tool.get('model'), str) and tool['model'].strip(), 'An explicit image tool model is required')
-    require(known_family(tool.get('model', '')) not in FAMILIES_26,
-            'GPT Image 2.6 Responses tool support is not verified; use Images generation/edit')
     require(tool.get('output_format', 'png') in ('png', 'jpeg', 'webp'),
             'Responses image tools support raster PNG/JPEG/WebP output only in this helper')
     # Reuse image option checks without sending synthetic generation parameters.
     options = {key: value for key, value in tool.items() if key in FIELDS}
     options.update(prompt='Validate image tool settings', stream=body.get('stream', False))
-    validate(options)
-    validate_fidelity(tool)
+    validate(options, provider)
+    validate_fidelity(tool, provider)
     require(tool.get('action', 'auto') in ('auto', 'generate', 'edit'), 'Invalid image tool action')
     if 'input_image_mask' in tool:
         tool['input_image_mask'], _ = image_ref(tool['input_image_mask'], root, overlay=True)
     body['tools'] = [tool]
-    body.setdefault('tool_choice', {'type': 'image_generation'})
+    if provider == 'openai':
+        body.setdefault('tool_choice', {'type': 'image_generation'})
     require(body.get('background', False) is False, 'Background Responses jobs are not supported; use Batch')
     for field in ('previous_response_id', 'safety_identifier'):
         if field in body:
@@ -551,7 +561,7 @@ def request_json(base, key, method, path, timeout, body=None, run_dir=None, raw=
     payload = raw if raw is not None else (None if body is None else
               json.dumps(body, ensure_ascii=False, allow_nan=False).encode('utf-8'))
     req = urllib.request.Request(base + path, data=payload, method=method, headers={
-        'Authorization': 'Bearer ' + key, 'Content-Type': content_type,
+        'Authorization': 'Bearer ' + key, 'Content-Type': content_type, 'User-Agent': USER_AGENT,
         'Accept': 'text/event-stream' if stream else 'application/json'})
     try:
         with urllib.request.build_opener(NoRedirect()).open(req, timeout=timeout) as response:
@@ -660,7 +670,7 @@ def read_stream(response, run_dir, path, expected):
                 require(isinstance(final, dict), 'Missing completed Responses payload')
                 write_json_replace(run_dir / 'response.json', final)
     require(final is not None, 'Stream ended without a final image response; keep events.jsonl; no automatic retry')
-    if path != '/responses':
+    if path != '/responses' and expected is not None:
         require(len(images) == expected, 'Stream ended with {} of {} final images; recover saved response; no automatic retry'.format(
             len(images), expected))
     return final
@@ -697,11 +707,38 @@ def list_models(base, key, timeout):
     raise ValueError('Model pagination exceeded 100 pages; refusing an incomplete catalog')
 
 
+def model_selection(provider, model_ids, skip_discovery):
+    require(not skip_discovery or provider == 'compatible',
+            '--skip-model-discovery is only available with a compatible provider')
+    return {'provider_profile': provider, 'required_model_ids': sorted(model_ids),
+            'catalog_check': 'skipped' if skip_discovery else 'pending'}
+
+
+def verify_model_selection(base, key, timeout, selection):
+    if selection['catalog_check'] == 'skipped':
+        return
+    catalog = list_models(base, key, min(timeout, 30))
+    missing = set(selection['required_model_ids']) - {row['id'] for row in catalog}
+    require(not missing, 'Selected model IDs absent from the fresh provider catalog; no submission: '
+            + ', '.join(sorted(missing)))
+    selection['catalog_check'] = 'verified'
+
+
 def new_run(output_dir):
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     prefix = 'imagegen-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-')
-    return Path(tempfile.mkdtemp(prefix=prefix, dir=str(output_dir)))
+    if os.name != 'nt':
+        return Path(tempfile.mkdtemp(prefix=prefix, dir=str(output_dir)))
+
+    # Windows run artifacts should inherit the chosen output directory's ACL.
+    while True:
+        run_dir = output_dir / (prefix + uuid.uuid4().hex)
+        try:
+            run_dir.mkdir()
+        except FileExistsError:
+            continue
+        return run_dir
 
 
 def write_json(path, data):
@@ -851,7 +888,7 @@ def download_batch_file(base, key, file_id, saved, timeout, chunk_size=1024 * 10
               'bytes_downloaded': 0, 'complete': False}
     try:
         req = urllib.request.Request(base + '/files/' + file_id + '/content',
-                                     headers={'Authorization': 'Bearer ' + key})
+                                     headers={'Authorization': 'Bearer ' + key, 'User-Agent': USER_AGENT})
         with partial.open('xb') as handle:
             with urllib.request.build_opener(NoRedirect()).open(req, timeout=timeout) as response:
                 declared = response.headers.get('Content-Length')
@@ -902,7 +939,7 @@ def batch_result_lines(path, max_line_bytes=None):
                 yield number, line
 
 
-def prepare_batch(path, endpoint=None):
+def prepare_batch(path, provider, endpoint=None):
     require(path.stat().st_size <= 200 * 1024 * 1024, 'Batch input exceeds 200 MiB')
     rows, ids, models, routes = [], set(), set(), set()
     for number, line in enumerate(batch_input_lines(path), 1):
@@ -918,16 +955,17 @@ def prepare_batch(path, endpoint=None):
         require(route in ('/v1/images/generations', '/v1/images/edits', '/v1/responses'),
                 'Use a supported /v1/ endpoint in batch rows')
         if route == '/v1/images/edits':
-            body = prepare_edit(row['body'], path.resolve().parent)
+            body = prepare_edit(row['body'], path.resolve().parent, provider)
         elif route == '/v1/responses':
-            body = prepare_responses(row['body'], path.resolve().parent)
+            body = prepare_responses(row['body'], path.resolve().parent, provider)
         else:
-            body = validate(row['body'])
+            body = validate(row['body'], provider)
         require(not body.get('stream'), 'Batch requests cannot stream')
         image_model = body['tools'][0]['model'] if route == '/v1/responses' else body['model']
-        family = known_family(image_model)
-        require(not family or PROFILES[family]['image_batch_documented'],
-                'Batch image support is documented here only for GPT Image 2.5; do not assume support for 2.6 or older families')
+        if route != '/v1/responses':
+            family = known_family(image_model, provider)
+            require(not family or PROFILES[family]['image_batch_documented'],
+                    'OpenAI Batch on the Images endpoints is documented here only for GPT Image 2.5')
         rows.append(dict(row, body=body))
         ids.add(custom_id)
         author = (body['svg']['model'],) if route == '/v1/images/generations' and 'svg' in body else ()
@@ -946,17 +984,19 @@ def prepare_batch(path, endpoint=None):
 
 def run_batch(args):
     if args.command == 'batch-submit':
-        rows, payload, endpoint, required_models = prepare_batch(args.jsonl, args.endpoint)
         base = api_base()
+        provider = provider_profile(base)
+        rows, payload, endpoint, required_models = prepare_batch(args.jsonl, provider, args.endpoint)
+        selection = model_selection(provider, required_models, args.skip_model_discovery)
         if args.dry_run:
             return {'dry_run': True, 'requests': len(rows), 'endpoint': endpoint,
-                    'models': sorted(required_models), 'bytes': len(payload), 'model_availability_checked': False}
+                    'models': sorted(required_models), 'bytes': len(payload), 'model_availability_checked': False,
+                    'model_selection': selection}
         key = api_key()
-        catalog = list_models(base, key, min(args.timeout, 30))
-        require(required_models <= {row['id'] for row in catalog},
-                'Selected model is absent from the fresh provider catalog; no batch submitted')
+        verify_model_selection(base, key, args.timeout, selection)
         run_dir = new_run(args.output_dir)
         (run_dir / 'input.jsonl').write_bytes(payload)
+        write_json(run_dir / 'request-meta.json', {'model_selection': selection})
         print(json.dumps({'stage': 'batch_upload', 'run_dir': str(run_dir)}), file=sys.stderr, flush=True)
         uploaded, _ = upload_file(base, key, payload, 'input.jsonl', 'batch', args.timeout)
         write_json(run_dir / 'uploaded-file.json', uploaded)
@@ -964,7 +1004,7 @@ def run_batch(args):
         batch, request_id = request_json(base, key, 'POST', '/batches', args.timeout,
             {'input_file_id': file_id, 'endpoint': endpoint, 'completion_window': '24h'})
         write_json(run_dir / 'batch.json', batch)
-        return {'run_dir': str(run_dir), 'request_id': request_id, 'batch': batch}
+        return {'run_dir': str(run_dir), 'request_id': request_id, 'batch': batch, 'model_selection': selection}
     base, key = api_base(), api_key()
     path = '/batches/' + safe_id(args.id)
     if args.command == 'batch-cancel':
@@ -1027,11 +1067,14 @@ def run(args):
     require(math.isfinite(args.timeout) and args.timeout > 0, 'timeout must be positive and finite')
     if args.command == 'models':
         base = api_base()
+        provider = provider_profile(base)
         rows = list_models(base, api_key(), args.timeout)
-        return {'models': [dict(row, skill_known_profile=known_family(row['id']),
-                                skill_capabilities=PROFILES.get(known_family(row['id'])),
-                                skill_image_candidate=bool(known_family(row['id'])
-                                                           or 'image' in row['id'].lower())) for row in rows]}
+        profiles = {}
+        for row in rows:
+            family = known_family(row['id'], provider)
+            if family:
+                profiles[row['id']] = {'family': family, 'capabilities': PROFILES[family]}
+        return {'provider_profile': provider, 'models': rows, 'openai_profiles': profiles}
     if args.command == 'upload':
         path = args.file.expanduser().resolve()
         require(path.is_file() and path.stat().st_size < 50 * 1024 * 1024,
@@ -1062,34 +1105,37 @@ def run(args):
         return save_images(response, run_dir, args.timeout, **context)
     if args.command.startswith('batch-'):
         return run_batch(args)
+    base = api_base()
+    provider = provider_profile(base)
     raw_body = load_json(args.json)
     transport = 'json'
     wire = {}
     if args.command == 'edit':
-        transport = edit_transport(raw_body, args.transport)
+        transport = edit_transport(raw_body, args.transport, provider)
         require(not args.multipart_image_field or transport == 'multipart',
                 '--multipart-image-field requires multipart transport')
-        body = prepare_edit(raw_body, args.json.resolve().parent, transport)
+        body = prepare_edit(raw_body, args.json.resolve().parent, provider, transport)
         if transport == 'multipart':
             payload, content_type = multipart_edit(body, args.multipart_image_field)
             wire = {'raw': payload, 'content_type': content_type}
     elif args.command == 'responses':
-        body = prepare_responses(raw_body, args.json.resolve().parent)
+        body = prepare_responses(raw_body, args.json.resolve().parent, provider)
     else:
-        body = validate(raw_body)
+        body = validate(raw_body, provider)
     path = {'generate': '/images/generations', 'edit': '/images/edits', 'responses': '/responses'}[args.command]
     image_model = body['tools'][0]['model'] if args.command == 'responses' else body['model']
     required_models = {image_model, body['model']}
     if args.command == 'generate' and 'svg' in body:
         required_models.add(body['svg']['model'])
-    base = api_base()
+    selection = model_selection(provider, required_models, args.skip_model_discovery)
     if args.dry_run:
         options = body['tools'][0] if args.command == 'responses' else body
         return {'dry_run': True, 'method': 'POST', 'url': base + path,
                 'transport': transport,
                 'model': image_model, 'mainline_model': body['model'] if args.command == 'responses' else None,
-                'known_profile': known_family(image_model),
-                'n': body.get('n', 1), 'output_format': options.get('output_format', 'png'),
+                'known_profile': known_family(image_model, provider),
+                'n': body.get('n'),
+                'output_format': options.get('output_format', 'png' if provider == 'openai' else None),
                 'size': options.get('size', 'auto'), 'quality': options.get('quality', 'auto'),
                 'complexity': options.get('complexity'),
                 'svg': options.get('svg'),
@@ -1097,14 +1143,12 @@ def run(args):
                 'frame_duration_ms': options.get('frame_duration_ms'),
                 'partial_images': options.get('partial_images', 0),
                 'stream': body.get('stream', False),
-                'model_availability_checked': False}
+                'model_availability_checked': False, 'model_selection': selection}
     key = api_key()
-    models = list_models(base, key, min(args.timeout, 30))
-    require(required_models <= {row['id'] for row in models},
-            'Selected model is absent from the fresh provider catalog; no generation submitted')
+    verify_model_selection(base, key, args.timeout, selection)
     run_dir = new_run(args.output_dir)
     write_json(run_dir / 'request.json', body)
-    write_json(run_dir / 'request-meta.json', {'transport': transport,
+    write_json(run_dir / 'request-meta.json', {'transport': transport, 'model_selection': selection,
                'content_type': 'multipart/form-data' if transport == 'multipart' else 'application/json',
                **({'image_field': args.multipart_image_field or ('image' if len(body['images']) == 1 else 'image[]')}
                   if transport == 'multipart' else {})})
@@ -1113,16 +1157,17 @@ def run(args):
     try:
         response, request_id = request_json(base, key, 'POST', path, args.timeout, body,
                                            run_dir=run_dir, stream=body.get('stream', False),
-                                           expected=body.get('n', 1), **wire)
+                                           expected=body.get('n'), **wire)
     except (ValueError, OSError, RuntimeError, http.client.HTTPException) as exc:
         raise RuntimeError('{}; run_dir={}; keep request/events/response for recovery'.format(
             sanitized(exc), run_dir)) from None
     store_response(response, run_dir, image_model, request_id)
     try:
         result = save_images(response, run_dir, args.timeout, image_model, request_id)
-        result['expected_images'] = body.get('n', 1) if args.command != 'responses' else None
-        if args.command != 'responses':
-            result['image_count_matches_request'] = len(result['images']) == body['n']
+        result['model_selection'] = selection
+        result['expected_images'] = body.get('n') if args.command != 'responses' else None
+        if result['expected_images'] is not None:
+            result['image_count_matches_request'] = len(result['images']) == result['expected_images']
         write_json_replace(run_dir / 'manifest.json', result)
         require(result.get('complete', True),
                 'Responses is incomplete or contains failed image calls; successful images saved in ' + str(run_dir))
@@ -1132,10 +1177,15 @@ def run(args):
             sanitized(exc), run_dir / 'response.json')) from None
 
 
+def add_model_discovery_option(parser):
+    parser.add_argument('--skip-model-discovery', action='store_true',
+                        help='For compatible providers with an unsupported or incomplete model catalog; use only documented explicit IDs')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
-    models = sub.add_parser('models', help='Fetch every provider model with advisory image annotations')
+    models = sub.add_parser('models', help='Fetch the configured provider model catalog')
     models.add_argument('--timeout', type=float, default=30)
     upload = sub.add_parser('upload', help='Upload an image with purpose=vision for file_id references')
     upload.add_argument('--file', required=True, type=Path)
@@ -1149,6 +1199,7 @@ def main():
         generate.add_argument('--output-dir', required=True, type=Path)
         generate.add_argument('--timeout', type=float, default=300)
         generate.add_argument('--dry-run', action='store_true')
+        add_model_discovery_option(generate)
         if command == 'edit':
             generate.add_argument('--transport', choices=('auto', 'json', 'multipart'), default='auto',
                                   help='Auto uses multipart for local/data references, JSON otherwise; never retries with another transport')
@@ -1164,6 +1215,7 @@ def main():
     submit.add_argument('--endpoint', choices=('/images/generations', '/images/edits', '/responses',
                                             '/v1/images/generations', '/v1/images/edits', '/v1/responses'))
     submit.add_argument('--dry-run', action='store_true')
+    add_model_discovery_option(submit)
     submit.add_argument('--timeout', type=float, default=300)
     for command in ('batch-status', 'batch-download', 'batch-cancel'):
         batch = sub.add_parser(command)

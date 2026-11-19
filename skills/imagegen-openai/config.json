@@ -4,14 +4,14 @@
     {
       "name": "IMAGEGEN_OPENAI_API_BASE_URL",
       "label": "API base URL",
-      "description": "Complete OpenAI-compatible API base, including /v1 when required. Needs model discovery and the selected Images, Responses, or Files/Batches endpoints; provider capabilities vary.",
+      "description": "Complete OpenAI-compatible API base, including /v1 when required. Must support the selected Images, Responses, or Files/Batches routes. Model discovery is checked by default.",
       "required": false,
       "secret": false,
       "default": "https://api.openai.com/v1",
       "translations": {
         "zh-CN": {
           "label": "模型服务基础地址",
-          "description": "完整的 OpenAI 兼容 API 基础地址，按供应商要求包含 /v1；须支持模型列表和所选 Images、Responses 或 Files/Batches 接口，具体能力以供应商为准。"
+          "description": "完整的 OpenAI 兼容 API 基础地址，按供应商要求包含 /v1；须支持所选的 Images、Responses 或 Files/Batches 接口，默认检查模型目录。"
         }
       }
     },
